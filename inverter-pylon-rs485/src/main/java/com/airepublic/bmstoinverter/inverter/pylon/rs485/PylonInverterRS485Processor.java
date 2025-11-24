@@ -118,15 +118,11 @@ public class PylonInverterRS485Processor extends Inverter {
             LOG.debug("Inverter is not requesting data, no frames to send");
             // try to send data actively
 
-    try {
-        Thread.sleep(100);   // <-- even 2–10 ms is enough
-    } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-    }
+
 
             
-            //final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
-            //frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
+            final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
+            frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
             
             // frames.add(prepareSendFrame(adr, (byte) 0x51, (byte) 0x00,
             // createManufacturerCode(aggregatedPack)));
@@ -143,8 +139,8 @@ public class PylonInverterRS485Processor extends Inverter {
             // frames.add(prepareSendFrame(adr, (byte) 0x63, (byte) 0x00,
             // createChargeDischargeIfno(aggregatedPack)));
 
-            //LOG.debug("Actively sending {} frames to inverter", frames.size());
-            //frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
+            LOG.debug("Actively sending {} frames to inverter", frames.size());
+            frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
     }
 
 
@@ -531,16 +527,19 @@ private static byte[] bytesToAsciiHex(byte[] payload) {
 
 @Override
 protected ByteBuffer readRequest(final Port port) throws IOException {
+
+    if (!port.hasBytesAvailable()) {
+        return null;   // do nothing, inverter hasn't sent anything yet
+    }
+
     try {
         return port.receiveFrame();
     } catch (IOException e) {
-        // Inverter didn't send a full frame in time; log and treat as "no request".
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Pylon P3.5 readRequest: no complete frame available yet: {}", e.getMessage());
-        }
-        return null;
+        LOG.debug("Pylon P3.5 readRequest: incomplete frame: {}", e.getMessage());
+        return null;    // critical: do NOT let this error loop infinitely
     }
 }
+
 
 
     @Override
