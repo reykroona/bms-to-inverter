@@ -273,95 +273,89 @@ public class PylonInverterRS485Processor extends Inverter {
 
 // 0x61 – Battery information for Pylon 3.5
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
-    // Safety: if aggregation failed, just return an empty buffer and let the caller handle it.
     if (aggregatedPack == null) {
         LOG.warn("Pylon P3.5: aggregatedPack is null in createBatteryInformation()");
         return new byte[0];
     }
 
-    // According to Pylon 3.5, most numeric fields are ASCII-encoded hex of tenths or whole units.
-    // We mirror the Python emulator here.
+    // -----------------------------
+    // 1. Emulator 51-byte template
+    // -----------------------------
+    // From working Python emulator:
+    //
+    //   8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
+    //
+    // This is EXACTLY 51 bytes of payload.
+    // We patch only the fields the inverter actually cares about.
+    //
+    byte[] payload = hexToBytes(
+        "8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101"
+    );
 
-    final StringBuilder payload = new StringBuilder();
+    // Helper to write big-endian Uint16 into the payload
+    final BiConsumer<Integer, Integer> set16 = (offset, value) -> {
+        payload[offset]     = (byte)((value >> 8) & 0xFF);
+        payload[offset + 1] = (byte)(value & 0xFF);
+    };
 
-    // 1) Pack voltage (0.01 V units) – 4 hex chars
-    //    Example: 52.30 V → 5230 (0x1476)
-    int packVoltage_mV100 = aggregatedPack.packVoltage * 10; // packVoltage is 0.1V → 0.01V units
-    if (packVoltage_mV100 < 0) {
-        packVoltage_mV100 = 0;
-    }
-    payload.append(String.format("%04X", packVoltage_mV100));
+    // -----------------------------
+    // 2. Patch real values into template
+    // -----------------------------
 
-    // 2) Pack current (0.1 A units, sign-aware) – 4 hex chars
-    //    Charge = positive, Discharge = negative
-    double currentA = aggregatedPack.packCurrent / 10.0; // packCurrent is 0.1A
-    int packCurrent_A10 = (int) Math.round(currentA * 10.0);
-    payload.append(String.format("%04X", packCurrent_A10 & 0xFFFF));
+    // Pack voltage → 0.01 V units → uint16
+    int pv = aggregatedPack.packVoltage * 10;  // already 0.1V, so *10 = 0.01V
+    if (pv < 0) pv = 0;
+    set16.accept(0, pv);  // bytes 0–1
 
-    // 3) SOC (%) – 2 hex chars
-    int soc = aggregatedPack.packSOC / 10; // packSOC is 0.1%
+    // Pack current (0.1A → 0.1A) but Pylon wants 0.1A scaled *10? (same as emulator)
+    // We keep your existing behavior: packCurrent is already 0.1A
+    int pc = aggregatedPack.packCurrent;       // sign preserved
+    set16.accept(2, pc & 0xFFFF);              // bytes 2–3
+
+    // SOC (%)
+    int soc = aggregatedPack.packSOC / 10;     // convert 0.1% → %
     if (soc < 0) soc = 0;
     if (soc > 100) soc = 100;
-    payload.append(String.format("%02X", soc));
+    payload[4] = (byte)(soc & 0xFF);
 
-    // 4) SOH (%) – 2 hex chars
-    int soh = aggregatedPack.packSOH / 10; // packSOH is 0.1%
-    if (soh <= 0 || soh > 100) {
-        // If we don’t know SOH, assume 100
-        soh = 100;
-    }
-    payload.append(String.format("%02X", soh));
+    // SOH (%)
+    int soh = aggregatedPack.packSOH / 10;
+    if (soh <= 0 || soh > 100) soh = 100;
+    payload[5] = (byte)(soh & 0xFF);
 
-    // 5) Nominal capacity (Ah, 0.1Ah units) – 4 hex chars
-    //    ratedCapacitymAh / 100 → 0.1Ah units
-    int ratedCapacity01Ah = aggregatedPack.ratedCapacitymAh / 100; // mAh → 0.1Ah
-    if (ratedCapacity01Ah < 0) {
-        ratedCapacity01Ah = 0;
-    }
-    payload.append(String.format("%04X", ratedCapacity01Ah & 0xFFFF));
+    // Rated capacity (mAh → 0.1Ah → uint16)
+    int rated = aggregatedPack.ratedCapacitymAh / 100;
+    if (rated < 0) rated = 0;
+    set16.accept(6, rated);
 
-    // 6) Remaining capacity (Ah, 0.1Ah units) – 4 hex chars
-    int remainingCapacity01Ah = aggregatedPack.remainingCapacitymAh / 100;
-    if (remainingCapacity01Ah < 0) {
-        remainingCapacity01Ah = 0;
-    }
-    payload.append(String.format("%04X", remainingCapacity01Ah & 0xFFFF));
+    // Remaining capacity (mAh → 0.1Ah)
+    int remain = aggregatedPack.remainingCapacitymAh / 100;
+    if (remain < 0) remain = 0;
+    set16.accept(8, remain);
 
-    // 7) Pack temperature – 4 hex chars (Kelvin*10 = (°C + 273.1)*10)
-    double tempC = aggregatedPack.tempAverage / 10.0; // tempAverage is 0.1°C
-    // If Daly gives something crazy or 0xFFFF, guard it
-    if (Double.isNaN(tempC) || tempC < -40.0 || tempC > 80.0) {
-        // If we have no valid temperature, assume 25°C
-        tempC = 25.0;
-    }
-    int tempK10 = (int) Math.round((tempC + 273.1) * 10.0);
-    payload.append(String.format("%04X", tempK10 & 0xFFFF));
+    // Temperature (0.1°C → Kelvin*10)
+    double tempC = aggregatedPack.tempAverage / 10.0;
+    if (Double.isNaN(tempC) || tempC < -40.0 || tempC > 80.0) tempC = 25.0;
+    int tempK10 = (int)Math.round((tempC + 273.1) * 10.0);
+    set16.accept(10, tempK10);
 
-    // 8) Total cycles – 4 hex chars
+    // Cycle count
     int cycles = aggregatedPack.bmsCycles;
     if (cycles < 0) cycles = 0;
-    payload.append(String.format("%04X", cycles & 0xFFFF));
+    set16.accept(12, cycles);
 
-    // 9) Cell count – 2 hex chars
+    // Cell count
     int cellCount = aggregatedPack.numberOfCells;
-    if (cellCount < 0 || cellCount > 0xFF) {
-        cellCount = 0;
-    }
-    payload.append(String.format("%02X", cellCount));
+    if (cellCount < 0 || cellCount > 255) cellCount = 0;
+    payload[14] = (byte)(cellCount & 0xFF);
 
-    // 10) Reserved bytes / padding for 3.5 frame length
-    //     Pylon 3.5 battery info frame is a fixed length. Pad out the rest with '0'
-    //     so the total frame (header + payload + CRC) matches the official length.
-    //     The bms-to-inverter code expects the ASCII line length (without '~' and '\r')
-    //     to be 100 characters for Pylon frames, so we keep that convention:
-    //
-    //     Header '20024600' is 8 chars, so payload should be 92 chars to total 100.
-    //
-
-
-    // Return ASCII bytes; the upper layer will prepend "~20024600" and append CRC + '\r'.
-    return payload.toString().getBytes(StandardCharsets.US_ASCII);
+    // -----------------------------
+    // Done — return the 51-byte payload
+    // Upper layer prepends "~20024661" and appends CRC + "\r"
+    // -----------------------------
+    return payload;
 }
+
 
 
 
