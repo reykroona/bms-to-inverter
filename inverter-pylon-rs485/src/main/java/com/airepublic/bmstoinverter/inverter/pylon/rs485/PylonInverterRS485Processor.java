@@ -296,83 +296,34 @@ if (System.currentTimeMillis() - startupTime < 5000) {
         return data;
     }
 
-// 0x61 – Battery information for Pylon 3.5
+/**
+ * CID2 = 0x61 – Battery information / “system analog”
+ * This matches the working Python emulator payload:
+ *   CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
+ */
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
-    if (aggregatedPack == null) {
-        LOG.warn("Pylon P3.5: aggregatedPack is null in createBatteryInformation()");
-        return new byte[0];
-    }
-
-    // 49-byte *binary* template matching your working Python emulator:
-    // 8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
-    byte[] payload = hexToBytes(
-        "8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101"
+    // 49-byte binary template from the Python emulator
+    final byte[] info = hexToBytes(
+            "CB20000050006400C863620DB8" +
+            "01010CBB01010BAA0BB7" +
+            "01010B9D01010BAA0BB8" +
+            "01010B9C01010BAA0BB6" +
+            "01010B9E0101"
     );
 
-    // -----------------------------
-    // Patch real values into template
-    // Offsets are in *binary* bytes
-    // -----------------------------
+    // TODO (optional later): if you want to patch some fields dynamically, you can
+    // overwrite specific bytes in 'info' here using aggregatedPack (e.g. total V, I, SOC).
+    // For now we keep the constants exactly like the Python emulator.
 
-    // 1) Pack voltage → 0.01 V units (uint16), bytes 0–1
-    // Daly packVoltage is 0.1V units, so *10 → 0.01V.
-    int pv01V = aggregatedPack.packVoltage * 10;
-    if (pv01V < 0) pv01V = 0;
-    set16(payload, 0, pv01V);
-
-    // 2) Pack current → 0.1A units, signed, bytes 2–3
-    // Daly packCurrent is already in 0.1A units with sign.
-    int pc01A = aggregatedPack.packCurrent;
-    set16(payload, 2, pc01A & 0xFFFF);
-
-    // 3) SOC (%) – byte 4 (use sanitizeSoc helper to avoid 0 / nonsense)
-    int socTenth = sanitizeSoc(aggregatedPack);   // 0.1% units
-    int soc = socTenth / 10;
-    if (soc < 0) soc = 0;
-    if (soc > 100) soc = 100;
-    payload[4] = (byte) (soc & 0xFF);
-
-    // 4) SOH (%) – byte 5
-    int sohTenth = aggregatedPack.packSOH;        // assume 0.1% units, may be 0
-    int soh = sohTenth > 0 ? sohTenth / 10 : 100; // default to 100% if unknown
-    if (soh < 0) soh = 0;
-    if (soh > 100) soh = 100;
-    payload[5] = (byte) (soh & 0xFF);
-
-    // 5) Rated capacity (mAh → 0.1Ah units), bytes 6–7
-    int rated = aggregatedPack.ratedCapacitymAh / 100;  // mAh / 100 → 0.1Ah units
-    if (rated < 0) rated = 0;
-    set16(payload, 6, rated);
-
-    // 6) Remaining capacity (mAh → 0.1Ah units), bytes 8–9
-    int remain = aggregatedPack.remainingCapacitymAh / 100;
-    if (remain < 0) remain = 0;
-    set16(payload, 8, remain);
-
-    // 7) Temperature: 0.1°C → protocol Kelvin*10 units, bytes 10–11
-    int tempTenthsC = sanitizeTemperature(aggregatedPack.tempAverage); // 0.1°C
-    double tempC = tempTenthsC / 10.0;
-    // Pylon: T_raw = T_C*10 + 2731
-    int tempK10 = (int) Math.round(tempC * 10.0 + 2731);
-    set16(payload, 10, tempK10);
-
-    // 8) Cycle count, bytes 12–13
-    int cycles = aggregatedPack.bmsCycles;
-    if (cycles < 0) cycles = 0;
-    set16(payload, 12, cycles);
-
-    // 9) Cell count, byte 14
-    int cellCount = aggregatedPack.numberOfCells;
-    if (cellCount < 0 || cellCount > 255) {
-        cellCount = 0;
+    // Convert binary INFO bytes to ASCII-HEX as expected by the RS485 code
+    StringBuilder sb = new StringBuilder(info.length * 2);
+    for (byte b : info) {
+        sb.append(String.format("%02X", b & 0xFF));
     }
-    payload[14] = (byte) (cellCount & 0xFF);
 
-    // The rest of the payload (bytes 15–48) remains as in the template.
-
-    // IMPORTANT: return INFO as ASCII hex, *not* binary.
-    return bytesToAsciiHex(payload);
+    return sb.toString().getBytes(StandardCharsets.US_ASCII);
 }
+
 
 
 
@@ -439,72 +390,30 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         return alarms;
     }
 
-// 0x63 – Charge / Discharge information for Pylon 3.5
+/**
+ * CID2 = 0x63 – Charge/Discharge info.
+ * Matches Python emulator payload:
+ *   D2F0ABE000FA00C8C0
+ *
+ * Fields (binary, before ASCII):
+ *   54000 mV, 44000 mV, 2.50 A, 2.00 A, status 0xC0
+ */
 private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
-    if (aggregatedPack == null) {
-        LOG.warn("Pylon P3.5: aggregatedPack is null in createChargeDischargeIfno()");
-        return new byte[0];
+    // 9-byte binary template from the Python emulator
+    final byte[] info = hexToBytes("D2F0ABE000FA00C8C0");
+
+    // TODO (optional later): patch these values from aggregatedPack if you want
+    // real limits instead of static demo values.
+
+    // Convert binary INFO bytes to ASCII-HEX
+    StringBuilder sb = new StringBuilder(info.length * 2);
+    for (byte b : info) {
+        sb.append(String.format("%02X", b & 0xFF));
     }
 
-    final StringBuilder payload = new StringBuilder();
-
-    // Helper to normalize a Daly current limit (0.1A units) with 100Balance quirks.
-    java.util.function.BiFunction<Integer, String, Integer> normalizeLimit01A = (raw01A, label) -> {
-        int limit01A = raw01A != null ? raw01A : 0;
-
-        // Daly 100Balance sometimes uses 0 or 0xFFFF to mean "no limit / unknown".
-        if (limit01A <= 0 || limit01A == 0xFFFF) {
-            // Fall back to default (e.g. 20A) so the inverter doesn't see 0.
-            double defaultAmps = DEFAULT_CURRENT_LIMIT_A; // e.g. 20.0
-            limit01A = (int) Math.round(defaultAmps * 10.0);
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Pylon P3.5 frame: {} limit invalid (raw=0x{}), using default {}A ({} A×10)",
-                          label,
-                          Integer.toHexString(raw01A != null ? raw01A : 0),
-                          defaultAmps,
-                          limit01A);
-            }
-        }
-
-        // Some BMS firmwares can report absurdly large values; clamp to something sane,
-        // e.g. 200A max:
-        double amps = limit01A / 10.0;
-        if (amps > 200.0) {
-            limit01A = 2000;
-        }
-
-        return limit01A;
-    };
-
-    // 1) Max charge current (0.1A units) – 4 hex chars
-    int maxChargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.maxPackChargeCurrent, "maxCharge");
-    payload.append(String.format("%04X", maxChargeCurrent01A & 0xFFFF));
-
-    // 2) Max discharge current (0.1A units) – 4 hex chars
-    int maxDischargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.maxPackDischargeCurrent, "maxDischarge");
-    payload.append(String.format("%04X", maxDischargeCurrent01A & 0xFFFF));
-
-    // 3) Max charge voltage (0.01V units) – 4 hex chars
-    double chargeLimitV = aggregatedPack.maxPackVoltageLimit / 10.0; // maxPackVoltageLimit is 0.1V
-    if (Double.isNaN(chargeLimitV) || chargeLimitV <= 0.0) {
-        // Fall back to something reasonable per 14s Li-ion, e.g. 57.4V
-        chargeLimitV = 57.4;
-    }
-    int maxChargeVoltage01V = (int) Math.round(chargeLimitV * 100.0);
-    payload.append(String.format("%04X", maxChargeVoltage01V & 0xFFFF));
-
-    // 4) Min discharge voltage (0.01V units) – 4 hex chars
-    double dischargeLimitV = aggregatedPack.minPackVoltageLimit / 10.0; // minPackVoltageLimit is 0.1V
-    if (Double.isNaN(dischargeLimitV) || dischargeLimitV <= 0.0) {
-        // Reasonable "empty" voltage for 14s, e.g. ~44V
-        dischargeLimitV = 44.0;
-    }
-    int minDischargeVoltage01V = (int) Math.round(dischargeLimitV * 100.0);
-    payload.append(String.format("%04X", minDischargeVoltage01V & 0xFFFF));
-
-    return payload.toString().getBytes(StandardCharsets.US_ASCII);
+    return sb.toString().getBytes(StandardCharsets.US_ASCII);
 }
+
 
 /**
  * Convert an even-length hex string to a byte array (binary).
