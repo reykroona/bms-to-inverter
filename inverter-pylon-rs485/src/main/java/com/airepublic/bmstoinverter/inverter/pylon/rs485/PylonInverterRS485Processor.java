@@ -45,7 +45,10 @@ public class PylonInverterRS485Processor extends Inverter {
     // ====== EMULATION TOGGLES ======
     private static final boolean USE_EMULATOR_61 = false;   // true = use emulator 0x61 payload
     private static final boolean USE_EMULATOR_63 = false;   // true = use emulator 0x63 payload
+    
+    private static final byte[] EMU_PAYLOAD_61 = hexStringToByteArray("CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101");
 
+    private static final byte[] EMU_PAYLOAD_63 = hexStringToByteArray("D2F0ABE000FA00C8C0");
     
     public PylonInverterRS485Processor() {
         super();
@@ -371,10 +374,11 @@ if (System.currentTimeMillis() - startupTime < 5000) {
 // 0x61 – Battery information for Pylon 3.5
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     
-     if (USE_EMULATOR_61) {
-        LOG.warn("0x61: Using EMULATOR payload instead of DALY data!");
-        return createEmulatorBatteryInformation();  // <-- your emulator version here
-    }
+if (USE_EMULATOR_61) {
+    LOG.warn("0x61: Using EMULATOR payload.");
+    return EMU_PAYLOAD_61;
+}
+
     
     
     final ByteBuffer buffer = ByteBuffer.allocate(4096);
@@ -851,11 +855,12 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 
 // 0x63 – Get System charge/discharge control info (BINARY INFO, like emulator)
 private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
-    
-     if (USE_EMULATOR_63) {
-        LOG.warn("0x63: Using EMULATOR payload instead of DALY data!");
-        return createEmulatorBatteryInformation();  // <-- your emulator version here
+        
+    if (USE_EMULATOR_63) {
+        LOG.warn("0x63: Using EMULATOR payload.");
+        return EMU_PAYLOAD_63;
     }
+
     
     
     
