@@ -379,18 +379,18 @@ if (tempAvgTenth == 0) {
     
     // --------- PACK VOLTAGE ----------
     int startPos = buffer.position();
-    int packVoltageScaled = (int) (aggregatedPack.packVoltage * 100);
+    int packVoltageScaled = (int) (aggregatedPack.packVoltage * 10);
     byte[] packVoltageBytes = ByteAsciiConverter.convertCharToAsciiBytes((char) packVoltageScaled);
-    LOG.debug("packVoltage: raw={} V, scaled={} (x100), asciiBytes={} (len={}, startPos={})",
+    LOG.debug("packVoltage: raw={} V, scaled={} (x10), asciiBytes={} (len={}, startPos={})",
             aggregatedPack.packVoltage, packVoltageScaled, bytesToHex(packVoltageBytes),
             packVoltageBytes.length, startPos);
     buffer.put(packVoltageBytes);
 
     // --------- PACK CURRENT ----------
     startPos = buffer.position();
-    short packCurrentScaled = (short) (aggregatedPack.packCurrent * 10);
+    short packCurrentScaled = (short) (aggregatedPack.packCurrent / 10);
     byte[] packCurrentBytes = ByteAsciiConverter.convertShortToAsciiBytes(packCurrentScaled);
-    LOG.debug("packCurrent: raw={} A, scaled={} (x10), asciiBytes={} (len={}, startPos={})",
+    LOG.debug("packCurrent: raw={} A, scaled={} (/10), asciiBytes={} (len={}, startPos={})",
             aggregatedPack.packCurrent, packCurrentScaled, bytesToHex(packCurrentBytes),
             packCurrentBytes.length, startPos);
     buffer.put(packCurrentBytes);
@@ -759,17 +759,17 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     LOG.debug("createChargeDischargeIfno(): START for aggregatedPack = {}", aggregatedPack);
 
     // 1) Max system charge voltage (V × 0.01)
-    double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit * 30.0;
+    double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit / 3.0;
     short  maxVoltScaled  = (short) maxVoltScaledD;
-    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (x30) -> 0x{}",
+    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (/3) -> 0x{}",
               aggregatedPack.maxPackVoltageLimit, maxVoltScaled,
               String.format("%04X", maxVoltScaled));
     buffer.putShort(maxVoltScaled);
 
     // 2) Min system discharge voltage (V × 0.01)
-    double minVoltScaledD = aggregatedPack.minPackVoltageLimit * 30.0;
+    double minVoltScaledD = aggregatedPack.minPackVoltageLimit / 3.0;
     short  minVoltScaled  = (short) minVoltScaledD;
-    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (x30) -> 0x{}",
+    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (/3) -> 0x{}",
               aggregatedPack.minPackVoltageLimit, minVoltScaled,
               String.format("%04X", minVoltScaled));
     buffer.putShort(minVoltScaled);
