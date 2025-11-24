@@ -119,8 +119,11 @@ if (System.currentTimeMillis() - startupTime < 5000) {
                     responseData = createAlarms(aggregatedPack);
                 break; // 0x62 Alarms
                 case 0x63:
-                    responseData = createChargeDischargeIfno(aggregatedPack);
-                break; // 0x63
+                    final byte[] info63 = createChargeDischargeIfno(aggregatedPack);
+                    LOG.debug("Payload 63 length = {}", info63 != null ? info63.length : -1);
+                    frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x63, info63, true)); // <-- binary INFO
+                break;
+
 
                 default:
                     // not supported
@@ -302,6 +305,14 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 
     LOG.debug("createBatteryInformation(): START for aggregatedPack = {}", aggregatedPack);
 
+// right at the top of createBatteryInformation(...)
+int tempAvgTenth = aggregatedPack.tempAverage;
+if (tempAvgTenth == 0) {
+    // rough: mid between pack tempMin and tempMax
+    tempAvgTenth = (aggregatedPack.tempMin + aggregatedPack.tempMax) / 2;
+}
+
+    
     // --------- PACK VOLTAGE ----------
     int startPos = buffer.position();
     int packVoltageScaled = (int) (aggregatedPack.packVoltage * 100);
@@ -349,7 +360,7 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 
     // --------- SOH (AVERAGE & LOWEST) ----------
     startPos = buffer.position();
-    byte sohAvgScaled = (byte) (aggregatedPack.packSOH / 10);
+    byte sohAvgScaled = (byte) Math.max(1, Math.min(100, aggregatedPack.packSOH / 10));
     byte[] sohAvgBytes = ByteAsciiConverter.convertByteToAsciiBytes(sohAvgScaled);
     LOG.debug("packSOH (avg): raw={} %, scaled={} (/10), asciiBytes={} (len={}, startPos={})",
             aggregatedPack.packSOH, sohAvgScaled, bytesToHex(sohAvgBytes),
@@ -438,7 +449,7 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 
     // --------- AVERAGE TEMPERATURE ----------
     startPos = buffer.position();
-    short tempAverageK = (short) (aggregatedPack.tempAverage + 2731);
+short tempAverageK = (short) (tempAvgTenth + 2731);
     byte[] tempAverageBytes = ByteAsciiConverter.convertShortToAsciiBytes(tempAverageK);
     LOG.debug("tempAverage: raw={} (0.1°C?), shifted={} (+2731), asciiBytes={} (len={}, startPos={})",
             aggregatedPack.tempAverage, tempAverageK, bytesToHex(tempAverageBytes),
@@ -676,118 +687,74 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         return alarms;
     }
 
-// 0x63 – Charge / Discharge information for Pylon 3.5
+// 0x63 – Get System charge/discharge control info (BINARY INFO, like emulator)
 private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
-    final ByteBuffer buffer = ByteBuffer.allocate(4096);
+    // 4 shorts + 1 byte = 9 bytes
+    final ByteBuffer buffer = ByteBuffer.allocate(9).order(ByteOrder.BIG_ENDIAN);
 
     LOG.debug("createChargeDischargeIfno(): START for aggregatedPack = {}", aggregatedPack);
 
-    int startPos;
-
-    // ---------- maxPackVoltageLimit ----------
-    startPos = buffer.position();
+    // 1) Max system charge voltage (V × 0.01)
     double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit * 100.0;
-    if (maxVoltScaledD > Short.MAX_VALUE || maxVoltScaledD < Short.MIN_VALUE) {
-        LOG.warn("maxPackVoltageLimit scaled value out of short range: raw={} V, scaled={}",
-                aggregatedPack.maxPackVoltageLimit, maxVoltScaledD);
-    }
-    short maxVoltScaled = (short) maxVoltScaledD;
-    byte[] maxVoltBytes = ByteAsciiConverter.convertShortToAsciiBytes(maxVoltScaled);
-    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (x100), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.maxPackVoltageLimit, maxVoltScaled,
-            bytesToHex(maxVoltBytes), maxVoltBytes.length, startPos);
-    buffer.put(maxVoltBytes);
+    short  maxVoltScaled  = (short) maxVoltScaledD;
+    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (x100) -> 0x{}",
+              aggregatedPack.maxPackVoltageLimit, maxVoltScaled,
+              String.format("%04X", maxVoltScaled));
+    buffer.putShort(maxVoltScaled);
 
-    // ---------- minPackVoltageLimit ----------
-    startPos = buffer.position();
+    // 2) Min system discharge voltage (V × 0.01)
     double minVoltScaledD = aggregatedPack.minPackVoltageLimit * 100.0;
-    if (minVoltScaledD > Short.MAX_VALUE || minVoltScaledD < Short.MIN_VALUE) {
-        LOG.warn("minPackVoltageLimit scaled value out of short range: raw={} V, scaled={}",
-                aggregatedPack.minPackVoltageLimit, minVoltScaledD);
-    }
-    short minVoltScaled = (short) minVoltScaledD;
-    byte[] minVoltBytes = ByteAsciiConverter.convertShortToAsciiBytes(minVoltScaled);
-    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (x100), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.minPackVoltageLimit, minVoltScaled,
-            bytesToHex(minVoltBytes), minVoltBytes.length, startPos);
-    buffer.put(minVoltBytes);
+    short  minVoltScaled  = (short) minVoltScaledD;
+    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (x100) -> 0x{}",
+              aggregatedPack.minPackVoltageLimit, minVoltScaled,
+              String.format("%04X", minVoltScaled));
+    buffer.putShort(minVoltScaled);
 
-    // ---------- maxPackChargeCurrent ----------
-    startPos = buffer.position();
+    // 3) Max charge current (A × 0.1)
     double maxChargeCurrentScaledD = aggregatedPack.maxPackChargeCurrent * 10.0;
-    if (maxChargeCurrentScaledD > Short.MAX_VALUE || maxChargeCurrentScaledD < Short.MIN_VALUE) {
-        LOG.warn("maxPackChargeCurrent scaled value out of short range: raw={} A, scaled={}",
-                aggregatedPack.maxPackChargeCurrent, maxChargeCurrentScaledD);
-    }
-    short maxChargeCurrentScaled = (short) maxChargeCurrentScaledD;
-    byte[] maxChargeBytes = ByteAsciiConverter.convertShortToAsciiBytes(maxChargeCurrentScaled);
-    LOG.debug("maxPackChargeCurrent: raw={} A, scaled={} (x10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.maxPackChargeCurrent, maxChargeCurrentScaled,
-            bytesToHex(maxChargeBytes), maxChargeBytes.length, startPos);
-    buffer.put(maxChargeBytes);
+    short  maxChargeCurrentScaled  = (short) maxChargeCurrentScaledD;
+    LOG.debug("maxPackChargeCurrent: raw={} A, scaled={} (x10) -> 0x{}",
+              aggregatedPack.maxPackChargeCurrent, maxChargeCurrentScaled,
+              String.format("%04X", maxChargeCurrentScaled));
+    buffer.putShort(maxChargeCurrentScaled);
 
-    // ---------- maxPackDischargeCurrent ----------
-    startPos = buffer.position();
+    // 4) Max discharge current (A × 0.1)
     double maxDischargeCurrentScaledD = aggregatedPack.maxPackDischargeCurrent * 10.0;
-    if (maxDischargeCurrentScaledD > Short.MAX_VALUE || maxDischargeCurrentScaledD < Short.MIN_VALUE) {
-        LOG.warn("maxPackDischargeCurrent scaled value out of short range: raw={} A, scaled={}",
-                aggregatedPack.maxPackDischargeCurrent, maxDischargeCurrentScaledD);
-    }
-    short maxDischargeCurrentScaled = (short) maxDischargeCurrentScaledD;
-    byte[] maxDischargeBytes = ByteAsciiConverter.convertShortToAsciiBytes(maxDischargeCurrentScaled);
-    LOG.debug("maxPackDischargeCurrent: raw={} A, scaled={} (x10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.maxPackDischargeCurrent, maxDischargeCurrentScaled,
-            bytesToHex(maxDischargeBytes), maxDischargeBytes.length, startPos);
-    buffer.put(maxDischargeBytes);
+    short  maxDischargeCurrentScaled  = (short) maxDischargeCurrentScaledD;
+    LOG.debug("maxPackDischargeCurrent: raw={} A, scaled={} (x10) -> 0x{}",
+              aggregatedPack.maxPackDischargeCurrent, maxDischargeCurrentScaled,
+              String.format("%04X", maxDischargeCurrentScaled));
+    buffer.putShort(maxDischargeCurrentScaled);
 
-    // ---------- charge / discharge MOS states bitfield ----------
+    // 5) MOSFET / force-charge flags (same bit usage as before, but now a raw byte)
     LOG.debug("charge/discharge MOS flags BEFORE bit-pack: chargeMOSState={}, dischargeMOSState={}, forceCharge={}",
-            aggregatedPack.chargeMOSState,
-            aggregatedPack.dischargeMOSState,
-            aggregatedPack.forceCharge);
+              aggregatedPack.chargeMOSState,
+              aggregatedPack.dischargeMOSState,
+              aggregatedPack.forceCharge);
 
-    byte chargeDischargeMOSStates = 0x00;
+    byte flags = 0x00;
+    flags = BitUtil.setBit(flags, 7, aggregatedPack.chargeMOSState);
+    flags = BitUtil.setBit(flags, 6, aggregatedPack.dischargeMOSState);
+    flags = BitUtil.setBit(flags, 5, aggregatedPack.forceCharge);
 
-    byte beforeBit7 = chargeDischargeMOSStates;
-    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 7, aggregatedPack.chargeMOSState);
-    LOG.debug("Set bit 7 (chargeMOSState): before=0x{}, after=0x{}",
-            String.format("%02X", beforeBit7),
-            String.format("%02X", chargeDischargeMOSStates));
+    LOG.debug("chargeDischargeMOSStates: finalByte=0x{}, bits=[charge(bit7)={}, discharge(bit6)={}, force(bit5)={}]",
+              String.format("%02X", flags),
+              aggregatedPack.chargeMOSState,
+              aggregatedPack.dischargeMOSState,
+              aggregatedPack.forceCharge);
 
-    byte beforeBit6 = chargeDischargeMOSStates;
-    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 6, aggregatedPack.dischargeMOSState);
-    LOG.debug("Set bit 6 (dischargeMOSState): before=0x{}, after=0x{}",
-            String.format("%02X", beforeBit6),
-            String.format("%02X", chargeDischargeMOSStates));
+    buffer.put(flags);
 
-    byte beforeBit5 = chargeDischargeMOSStates;
-    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 5, aggregatedPack.forceCharge);
-    LOG.debug("Set bit 5 (forceCharge): before=0x{}, after=0x{}",
-            String.format("%02X", beforeBit5),
-            String.format("%02X", chargeDischargeMOSStates));
-
-    startPos = buffer.position();
-    byte[] mosStateBytes = ByteAsciiConverter.convertByteToAsciiBytes(chargeDischargeMOSStates);
-    LOG.debug("chargeDischargeMOSStates: finalByte=0x{}, bits=[charge(bit7)={}, discharge(bit6)={}, force(bit5)={}], asciiBytes={} (len={}, startPos={})",
-            String.format("%02X", chargeDischargeMOSStates),
-            aggregatedPack.chargeMOSState,
-            aggregatedPack.dischargeMOSState,
-            aggregatedPack.forceCharge,
-            bytesToHex(mosStateBytes), mosStateBytes.length, startPos);
-    buffer.put(mosStateBytes);
-
-    // ✅ capture length before flip
-    final int length = buffer.position();
     buffer.flip();
-
-    final byte[] data = new byte[length];
+    final byte[] data = new byte[buffer.remaining()];
     buffer.get(data);
 
-    LOG.debug("createChargeDischargeIfno(): payload length = {}", length);
+    LOG.debug("createChargeDischargeIfno(): payload length = {}", data.length);
     LOG.debug("createChargeDischargeIfno(): final payload hex = {}", bytesToHex(data));
 
     return data;
 }
+
 
 
     
@@ -908,25 +875,53 @@ private static String bytesToHex(byte[] bytes) {
         return builder.toString();
     }
 
+// Existing method becomes a thin wrapper (ASCII INFO by default)
+ByteBuffer prepareSendFrame(final byte address,
+                            final byte cid1,
+                            final byte cid2,
+                            final byte[] data) {
+    return prepareSendFrame(address, cid1, cid2, data, false);
+}
 
-    ByteBuffer prepareSendFrame(final byte address, final byte cid1, final byte cid2, final byte[] data) {
-        final ByteBuffer sendFrame = ByteBuffer.allocate(18 + data.length).order(ByteOrder.BIG_ENDIAN);
-        sendFrame.put((byte) 0x7E); // Start flag
-        sendFrame.put((byte) 0x32); // version
-        sendFrame.put((byte) 0x30); // version
-        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address)); // address
-        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1)); // command CID1
-        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2)); // command CID2
-        // Frame Length Byte
-        sendFrame.put(createLengthCheckSum(data.length));
-        // data
+// New overload: infoIsBinary = true means INFO is raw bytes (0x63 case)
+ByteBuffer prepareSendFrame(final byte address,
+                            final byte cid1,
+                            final byte cid2,
+                            final byte[] data,
+                            final boolean infoIsBinary) {
+
+    final int infoAsciiLength = infoIsBinary ? data.length * 2 : data.length;
+    final int dataLen         = data != null ? data.length : 0;
+
+    // 18 = SOI(1) + VER(2) + ADR(2) + CID1(2) + CID2(2) + LEN(4) + CHKSUM(4) + EOI(1)
+    final ByteBuffer sendFrame = ByteBuffer.allocate(18 + dataLen)
+                                           .order(ByteOrder.BIG_ENDIAN);
+
+    sendFrame.put((byte) 0x7E);        // SOI
+    sendFrame.put((byte) 0x32);        // '2'
+    sendFrame.put((byte) 0x30);        // '0'
+
+    // ADR / CID1 / CID2 as ASCII hex
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
+
+    // LENID/LCHKSUM – in ASCII, based on number of ASCII bytes in INFO
+    sendFrame.put(createLengthCheckSum(infoAsciiLength));
+
+    // INFO (ASCII or binary depending on infoIsBinary)
+    if (dataLen > 0) {
         sendFrame.put(data);
-        // checksum
-        sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
-        sendFrame.put((byte) 0x0D); // End flag
-
-        return sendFrame;
     }
+
+    // CHKSUM (ASCII) over bytes from VER through last INFO byte
+    sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
+
+    // EOI
+    sendFrame.put((byte) 0x0D);
+
+    return sendFrame;
+}
 
 
     private byte[] createChecksum(final ByteBuffer sendFrame, final int bodyLength) {
