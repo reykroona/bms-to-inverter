@@ -357,15 +357,7 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     //
     //     Header '20024600' is 8 chars, so payload should be 92 chars to total 100.
     //
-    int headerLen = 8;
-    int desiredTotalAsciiLen = 100;
-    int desiredPayloadLen = desiredTotalAsciiLen - headerLen; // 92
-    if (payload.length() < desiredPayloadLen) {
-        payload.append(padRight("", desiredPayloadLen - payload.length(), '0'));
-    } else if (payload.length() > desiredPayloadLen) {
-        // Truncate if we ever overshoot (defensive)
-        payload.setLength(desiredPayloadLen);
-    }
+
 
     // Return ASCII bytes; the upper layer will prepend "~20024600" and append CRC + '\r'.
     return payload.toString().getBytes(StandardCharsets.US_ASCII);
@@ -499,16 +491,6 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     }
     int minDischargeVoltage01V = (int) Math.round(dischargeLimitV * 100.0);
     payload.append(String.format("%04X", minDischargeVoltage01V & 0xFFFF));
-
-    // 5) Reserved / flags / future fields – pad to the same payload length
-    int headerLen = 8;
-    int desiredTotalAsciiLen = 100;
-    int desiredPayloadLen = desiredTotalAsciiLen - headerLen; // 92 chars
-    if (payload.length() < desiredPayloadLen) {
-        payload.append(padRight("", desiredPayloadLen - payload.length(), '0'));
-    } else if (payload.length() > desiredPayloadLen) {
-        payload.setLength(desiredPayloadLen);
-    }
 
     return payload.toString().getBytes(StandardCharsets.US_ASCII);
 }
