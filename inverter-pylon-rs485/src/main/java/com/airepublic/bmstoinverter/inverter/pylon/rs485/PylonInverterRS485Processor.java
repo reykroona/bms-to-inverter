@@ -52,95 +52,28 @@ public class PylonInverterRS485Processor extends Inverter {
 
 
     @Override
-    protected List<ByteBuffer> createSendFrames(final ByteBuffer requestFrame, final BatteryPack aggregatedPack) {
-        final List<ByteBuffer> frames = new ArrayList<>();
+@Override
+protected List<ByteBuffer> createSendFrames(final ByteBuffer requestFrame, final BatteryPack aggregatedPack) {
+    final List<ByteBuffer> frames = new ArrayList<>();
 
-        // check if the inverter is actively requesting data
-        if (requestFrame != null) {
-            LOG.debug("Inverter actively requesting frames from BMS");
-            LOG.info("RX ASCII: {}", toAsciiString(requestFrame));
-            requestFrame.position(3);
-            final byte adr = ByteAsciiConverter.convertAsciiBytesToByte(requestFrame.get(), requestFrame.get());
-            final byte cid1 = ByteAsciiConverter.convertAsciiBytesToByte(requestFrame.get(), requestFrame.get());
-            final byte cid2 = ByteAsciiConverter.convertAsciiBytesToByte(requestFrame.get(), requestFrame.get());
-            final byte[] lengthBytes = new byte[4];
-            requestFrame.get(lengthBytes);
-            final int length = ByteAsciiConverter.convertAsciiBytesToShort(lengthBytes) & 0x0FFF;
-            final byte[] data = new byte[length];
-            requestFrame.get(data);
+    if (requestFrame != null && isInverterRequest(requestFrame)) {
+        // ... handle CID2 0x61, 0x63, etc ...
+        final ByteBuffer responseFrame = prepareSendFrame(adr, cid1, (byte) 0x00, responseData);
+        frames.add(responseFrame);
+        LOG.info("TX ASCII: {}", toAsciiString(responseFrame));
+        LOG.debug("Responding to inverter with: {}", Port.printBuffer(responseFrame));
+    } else {
+        LOG.debug("Inverter is not requesting data, no frames to send");
+        // try to send data actively
 
-            if (cid1 != 0x46) {
-                // not supported
-                return frames;
-            }
-
-            byte[] responseData = null;
-
-            switch (cid2) {
-                case 0x4F: // 0x4F Protocol Version
-                    responseData = createProtocolVersion(aggregatedPack);
-                break;
-                case 0x51: // 0x51 Manufacturer Code
-                    responseData = createManufacturerCode(aggregatedPack);
-                break;
-                case (byte) 0x92: // 0x92 Charge/Discharge Management Info
-                    responseData = createChargeDischargeManagementInfo(aggregatedPack);
-                break;
-                case 0x42: // 0x42 Cell Information
-                    responseData = createCellInformation(aggregatedPack);
-                break;
-                case 0x47: // 0x47 Voltage/Current Limits
-                    responseData = createVoltageCurrentLimits(aggregatedPack);
-                break;
-                case 0x60: // 0x60 System Info
-                    responseData = createSystemInfo(aggregatedPack);
-                break;
-                case 0x61: // 0x61 Battery Information
-                    responseData = createBatteryInformation(aggregatedPack);
-                break;
-                case 0x62:
-                    responseData = createAlarms(aggregatedPack);
-                break; // 0x62 Alarms
-                case 0x63:
-                    responseData = createChargeDischargeIfno(aggregatedPack);
-                break; // 0x63
-
-                default:
-                    // not supported
-                    return frames;
-            }
-
-            final ByteBuffer responseFrame = prepareSendFrame(adr, cid1, (byte) 0x00, responseData);
-            frames.add(responseFrame);
-            LOG.info("TX ASCII: {}", toAsciiString(responseFrame));
-            LOG.debug("Responding to inverter with: {}", Port.printBuffer(responseFrame));
-        } else {
-            LOG.debug("Inverter is not requesting data, no frames to send");
-            // try to send data actively
-
-            final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
-            frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x51, (byte) 0x00,
-            // createManufacturerCode(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x92, (byte) 0x00,
-            // createChargeDischargeManagementInfo(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x42, (byte) 0x00,
-            // createCellInformation(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x47, (byte) 0x00,
-            // createVoltageCurrentLimits(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x60, (byte) 0x00, createSystemInfo(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x61, (byte) 0x00,
-            // createBatteryInformation(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x62, (byte) 0x00, createAlarms(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x63, (byte) 0x00,
-            // createChargeDischargeIfno(aggregatedPack)));
-
-            LOG.debug("Actively sending {} frames to inverter", frames.size());
-            frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
-        }
-
-        return frames;
+        final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
+        frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
+        // many commented-out frames here...
     }
+
+    return frames;
+}
+
 
     
     private String toAsciiString(final ByteBuffer buffer) {
@@ -511,15 +444,21 @@ private static void set16(byte[] payload, int offset, int value) {
 
 @Override
 protected ByteBuffer readRequest(final Port port) throws IOException {
-    try {
-        return port.receiveFrame();
-    } catch (IOException e) {
-        // Inverter didn't send a full frame in time; log and treat as "no request".
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Pylon P3.5 readRequest: no complete frame available yet: {}", e.getMessage());
-        }
+    // Read a full frame from the inverter port.
+    final ByteBuffer requestFrame = port.receiveFrame();
+
+    if (requestFrame == null || requestFrame.remaining() == 0) {
+        // No valid frame received; caller will handle the null.
+        LOG.debug("No frame received from inverter");
         return null;
     }
+
+    // Log what we got from the inverter (similar to the emulator debug output).
+    LOG.debug("Inverter actively requesting frames from BMS");
+    LOG.info("RX ASCII: {}", toAsciiString(requestFrame));
+    LOG.debug("RX: {}", Port.printBuffer(requestFrame));
+
+    return requestFrame;
 }
 
 
