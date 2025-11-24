@@ -939,12 +939,11 @@ private static String bytesToHex(byte[] bytes) {
         return builder.toString();
     }
 
-// Wrapper: default is ASCII-encoded INFO (what 4F/51/42/47/60/61 use)
+// Wrapper: default is ASCII-encoded INFO
 ByteBuffer prepareSendFrame(final byte address,
                             final byte cid1,
                             final byte cid2,
                             final byte[] data) {
-    // If you ever pass null, we log and return null instead of NPE
     if (data == null) {
         LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}): data is NULL",
                   String.format("%02X", address),
@@ -952,6 +951,8 @@ ByteBuffer prepareSendFrame(final byte address,
                   String.format("%02X", cid2));
         return null;
     }
+
+    // Call the real one
     return prepareSendFrame(address, cid1, cid2, data, false);
 }
 
@@ -959,14 +960,15 @@ ByteBuffer prepareSendFrame(final byte address,
 ByteBuffer prepareSendFrame(final byte address,
                             final byte cid1,
                             final byte cid2,
-                            final byte[] data) {
+                            final byte[] data,
+                            final boolean binaryMode) {
 
     if (data == null) {
         LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}): data is NULL",
                 String.format("%02X", address),
                 String.format("%02X", cid1),
                 String.format("%02X", cid2));
-        return null;   // ⬅️ critical
+        return null;
     }
 
     final int dataLen = data.length;
@@ -993,6 +995,7 @@ ByteBuffer prepareSendFrame(final byte address,
 
     return sendFrame;
 }
+
 
 
 
