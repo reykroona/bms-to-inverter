@@ -302,93 +302,71 @@ if (System.currentTimeMillis() - startupTime < 5000) {
  *   CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
  */
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
-    // 49-byte binary template from the Python emulator
-    final byte[] info = hexToBytes(
-            "CB20000050006400C863620DB8" +
-            "01010CBB01010BAA0BB7" +
-            "01010B9D01010BAA0BB8" +
-            "01010B9C01010BAA0BB6" +
-            "01010B9E0101"
-    );
+    final ByteBuffer buffer = ByteBuffer.allocate(4096);
 
-    // TODO (optional later): if you want to patch some fields dynamically, you can
-    // overwrite specific bytes in 'info' here using aggregatedPack (e.g. total V, I, SOC).
-    // For now we keep the constants exactly like the Python emulator.
+    buffer.put(ByteAsciiConverter.convertCharToAsciiBytes((char) (aggregatedPack.packVoltage * 100)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.packCurrent * 10)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOC / 10)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.bmsCycles));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 10000));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOH / 10)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOH / 10)));
 
-    // Convert binary INFO bytes to ASCII-HEX as expected by the RS485 code
-    StringBuilder sb = new StringBuilder(info.length * 2);
-    for (byte b : info) {
-        sb.append(String.format("%02X", b & 0xFF));
+    int maxPack = 0;
+    int minPack = 0;
+
+    for (int i = 0; i < getEnergyStorage().getBatteryPacks().size(); i++) {
+        final BatteryPack pack = getEnergyStorage().getBatteryPack(i);
+        if (pack.maxCellmV == aggregatedPack.maxCellmV) { maxPack = i; }
+        if (pack.minCellmV == aggregatedPack.minCellmV) { minPack = i; }
     }
 
-    return sb.toString().getBytes(StandardCharsets.US_ASCII);
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.maxCellmV));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.maxCellVNum));
+
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.minCellmV));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.minCellVNum));
+
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+
+    maxPack = 0;
+    minPack = 0;
+
+    for (int i = 0; i < getEnergyStorage().getBatteryPacks().size(); i++) {
+        final BatteryPack pack = getEnergyStorage().getBatteryPack(i);
+        if (pack.tempMax == aggregatedPack.tempMax) { maxPack = i; }
+        if (pack.tempMin == aggregatedPack.tempMin) { minPack = i; }
+    }
+
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempMax + 2731)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.tempMaxCellNum));
+
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempMin + 2731)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.tempMinCellNum));
+
+    // MOSFET temps
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+
+    // BMS temps
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+
+    final byte[] data = new byte[buffer.position()];
+    buffer.get(data, 0, buffer.position());
+    return data;
 }
 
-
-
-
-    // 0x62
-    private byte[] createAlarms(final BatteryPack pack) {
-        final byte[] alarms = new byte[8];
-
-        // warning alarms 1
-        byte value = 0;
-        value = BitUtil.setBit(value, 7, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_HIGH) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_LOW) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_HIGH) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 4, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_LOW) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 3, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_HIGH) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 2, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_LOW) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 1, false);
-        value = BitUtil.setBit(value, 0, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_DIFFERENCE_HIGH) == AlarmLevel.WARNING);
-        byte[] bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
-        alarms[0] = bytes[0];
-        alarms[1] = bytes[1];
-
-        // warning alarms 2
-        value = 0;
-        value = BitUtil.setBit(value, 7, pack.getAlarmLevel(Alarm.TEMPERATURE_SENSOR_DIFFERENCE_HIGH) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.CHARGE_CURRENT_HIGH) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.DISCHARGE_CURRENT_HIGH) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 4, pack.getAlarmLevel(Alarm.FAILURE_COMMUNICATION_INTERNAL) == AlarmLevel.WARNING);
-        value = BitUtil.setBit(value, 3, false);
-        value = BitUtil.setBit(value, 2, false);
-        value = BitUtil.setBit(value, 1, false);
-        value = BitUtil.setBit(value, 0, false);
-        bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
-        alarms[2] = bytes[0];
-        alarms[3] = bytes[1];
-
-        // protection alarms 1
-        value = 0;
-        value = BitUtil.setBit(value, 7, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_HIGH) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_LOW) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_HIGH) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 4, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_LOW) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 3, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_HIGH) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 2, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_LOW) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 1, false);
-        value = BitUtil.setBit(value, 0, false);
-        bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
-        alarms[4] = bytes[0];
-        alarms[5] = bytes[1];
-
-        // protection alarms 2
-        value = 0;
-        value = BitUtil.setBit(value, 7, false);
-        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.CHARGE_CURRENT_HIGH) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.DISCHARGE_CURRENT_HIGH) == AlarmLevel.ALARM);
-        value = BitUtil.setBit(value, 4, false);
-        value = BitUtil.setBit(value, 3, pack.getAlarmLevel(Alarm.FAILURE_OTHER) == AlarmLevel.ALARM);
-        BitUtil.setBit(value, 2, false);
-        value = BitUtil.setBit(value, 1, false);
-        value = BitUtil.setBit(value, 0, false);
-        bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
-        alarms[6] = bytes[0];
-        alarms[7] = bytes[1];
-
-        return alarms;
-    }
 
 /**
  * CID2 = 0x63 – Charge/Discharge info.
@@ -399,20 +377,25 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
  *   54000 mV, 44000 mV, 2.50 A, 2.00 A, status 0xC0
  */
 private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
-    // 9-byte binary template from the Python emulator
-    final byte[] info = hexToBytes("D2F0ABE000FA00C8C0");
+    final ByteBuffer buffer = ByteBuffer.allocate(4096);
 
-    // TODO (optional later): patch these values from aggregatedPack if you want
-    // real limits instead of static demo values.
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackVoltageLimit * 100)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.minPackVoltageLimit * 100)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackChargeCurrent * 10)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackDischargeCurrent * 10)));
 
-    // Convert binary INFO bytes to ASCII-HEX
-    StringBuilder sb = new StringBuilder(info.length * 2);
-    for (byte b : info) {
-        sb.append(String.format("%02X", b & 0xFF));
-    }
+    byte chargeDischargeMOSStates = 0x00;
+    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 7, aggregatedPack.chargeMOSState);
+    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 6, aggregatedPack.dischargeMOSState);
+    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 5, aggregatedPack.forceCharge);
 
-    return sb.toString().getBytes(StandardCharsets.US_ASCII);
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(chargeDischargeMOSStates));
+
+    final byte[] data = new byte[buffer.position()];
+    buffer.get(data, 0, buffer.position());
+    return data;
 }
+
 
 
 /**
@@ -455,6 +438,26 @@ private static byte[] bytesToAsciiHex(byte[] payload) {
 }
 
 
+/**
+ * Convert a binary payload to ASCII hex for P3.5.
+ * e.g. [0xCB, 0x20] -> "CB20" (as bytes).
+ */
+private byte[] toAsciiHex(final byte[] payload) {
+    final byte[] ascii = new byte[payload.length * 2];
+
+    for (int i = 0; i < payload.length; i++) {
+        final int v = payload[i] & 0xFF;
+        final int hi = (v >>> 4) & 0x0F;
+        final int lo = v & 0x0F;
+
+        ascii[i * 2]     = (byte) (hi < 10 ? ('0' + hi) : ('A' + (hi - 10)));
+        ascii[i * 2 + 1] = (byte) (lo < 10 ? ('0' + lo) : ('A' + (lo - 10)));
+    }
+
+    return ascii;
+}
+
+    
 @Override
 protected ByteBuffer readRequest(final Port port) throws IOException {
     try {
