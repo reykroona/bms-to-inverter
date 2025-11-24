@@ -142,34 +142,6 @@ public class PylonInverterRS485Processor extends Inverter {
         return frames;
     }
 
-/**
- * Convert an even-length hex string to a byte array.
- */
-private static byte[] hexToBytes(String hex) {
-    int len = hex.length();
-    if ((len & 1) != 0) {
-        throw new IllegalArgumentException("hex string must have even length");
-    }
-    byte[] data = new byte[len / 2];
-    for (int i = 0; i < len; i += 2) {
-        int hi = Character.digit(hex.charAt(i), 16);
-        int lo = Character.digit(hex.charAt(i + 1), 16);
-        if (hi < 0 || lo < 0) {
-            throw new IllegalArgumentException("invalid hex character in: " + hex);
-        }
-        data[i / 2] = (byte) ((hi << 4) + lo);
-    }
-    return data;
-}
-
-/**
- * Write a 16-bit value into payload[offset..offset+1] big-endian.
- */
-private static void set16(byte[] payload, int offset, int value) {
-    payload[offset]     = (byte) ((value >> 8) & 0xFF);
-    payload[offset + 1] = (byte) (value & 0xFF);
-}
-
     
     private String toAsciiString(final ByteBuffer buffer) {
         final ByteBuffer copy = buffer.asReadOnlyBuffer();
@@ -377,6 +349,7 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 }
 
 
+
     // 0x62
     private byte[] createAlarms(final BatteryPack pack) {
         final byte[] alarms = new byte[8];
@@ -505,6 +478,34 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     payload.append(String.format("%04X", minDischargeVoltage01V & 0xFFFF));
 
     return payload.toString().getBytes(StandardCharsets.US_ASCII);
+}
+
+    /**
+ * Convert an even-length hex string to a byte array.
+ */
+private static byte[] hexToBytes(String hex) {
+    int len = hex.length();
+    if ((len & 1) != 0) {
+        throw new IllegalArgumentException("hex string must have even length");
+    }
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i < len; i += 2) {
+        int hi = Character.digit(hex.charAt(i), 16);
+        int lo = Character.digit(hex.charAt(i + 1), 16);
+        if (hi < 0 || lo < 0) {
+            throw new IllegalArgumentException("invalid hex character in: " + hex);
+        }
+        data[i / 2] = (byte) ((hi << 4) + lo);
+    }
+    return data;
+}
+
+/**
+ * Write a 16-bit value into payload[offset..offset+1] big-endian.
+ */
+private static void set16(byte[] payload, int offset, int value) {
+    payload[offset]     = (byte) ((value >> 8) & 0xFF);
+    payload[offset + 1] = (byte) (value & 0xFF);
 }
 
 
