@@ -91,7 +91,7 @@ if (System.currentTimeMillis() - startupTime < 5000) {
                 return frames;
             }
 
-            byte[] responseData = null;
+/*            byte[] responseData = null;
 
             switch (cid2) {
                 case 0x4F: // 0x4F Protocol Version
@@ -134,6 +134,70 @@ if (System.currentTimeMillis() - startupTime < 5000) {
             frames.add(responseFrame);
             LOG.info("TX ASCII: {}", toAsciiString(responseFrame));
             LOG.debug("Responding to inverter with: {}", Port.printBuffer(responseFrame));
+
+*/
+
+            byte[] responseData = null;
+
+            switch (cid2) {
+                case 0x4F:
+                    responseData = createProtocolVersion(aggregatedPack);
+                    LOG.debug("Payload 4F length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case 0x51:
+                    responseData = createManufacturerCode(aggregatedPack);
+                    LOG.debug("Payload 51 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case (byte) 0x92:
+                    responseData = createChargeDischargeManagementInfo(aggregatedPack);
+                    LOG.debug("Payload 92 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case 0x42:
+                    responseData = createCellInformation(aggregatedPack);
+                    LOG.debug("Payload 42 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case 0x47:
+                    responseData = createVoltageCurrentLimits(aggregatedPack);
+                    LOG.debug("Payload 47 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case 0x60:
+                    responseData = createSystemInfo(aggregatedPack);
+                    LOG.debug("Payload 60 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case 0x61:
+                    responseData = createBatteryInformation(aggregatedPack);
+                    LOG.debug("Payload 61 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                case 0x63:
+                    responseData = createChargeDischargeIfno(aggregatedPack);
+                    LOG.debug("Payload 63 length = {}", responseData != null ? responseData.length : -1);
+                    break;
+            
+                default:
+                    LOG.warn("Unsupported CID2 0x{}, not sending any frames",
+                             String.format("%02X", cid2));
+                    break;
+            }
+
+            // ⬇️ This is the important part
+            if (responseData == null) {
+                // Inverter asked for something we don't implement – just don't answer.
+                return frames;
+            }
+            
+            ByteBuffer frame = prepareSendFrame(adr, (byte) 0x46, cid2, responseData);
+            if (frame != null) {
+                frames.add(frame);
+            }
+            return frames;
+                        
     } else {
             LOG.debug("Inverter is not requesting data, no frames to send");
             // try to send data actively
@@ -895,48 +959,41 @@ ByteBuffer prepareSendFrame(final byte address,
 ByteBuffer prepareSendFrame(final byte address,
                             final byte cid1,
                             final byte cid2,
-                            final byte[] data,
-                            final boolean infoIsBinary) {
+                            final byte[] data) {
 
     if (data == null) {
-        LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}, infoIsBinary={}): data is NULL",
-                  String.format("%02X", address),
-                  String.format("%02X", cid1),
-                  String.format("%02X", cid2),
-                  infoIsBinary);
-        return null;
+        LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}): data is NULL",
+                String.format("%02X", address),
+                String.format("%02X", cid1),
+                String.format("%02X", cid2));
+        return null;   // ⬅️ critical
     }
 
-    final int dataLen         = data.length;
-    final int infoAsciiLength = infoIsBinary ? dataLen * 2 : dataLen;
-
-    // 18 = SOI(1) + VER(2) + ADR(2) + CID1(2) + CID2(2) + LEN(4) + CHKSUM(4) + EOI(1)
-    final ByteBuffer sendFrame = ByteBuffer.allocate(18 + dataLen)
-                                           .order(ByteOrder.BIG_ENDIAN);
+    final int dataLen = data.length;
+    final ByteBuffer sendFrame = ByteBuffer
+            .allocate(18 + dataLen)
+            .order(ByteOrder.BIG_ENDIAN);
 
     sendFrame.put((byte) 0x7E); // SOI
-    sendFrame.put((byte) 0x32); // '2'
-    sendFrame.put((byte) 0x30); // '0'
+    sendFrame.put((byte) 0x32);
+    sendFrame.put((byte) 0x30);
 
-    // ADR / CID1 / CID2 as ASCII hex
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
 
-    // LENID / LCHKSUM – in ASCII, based on # of ASCII bytes of INFO
-    sendFrame.put(createLengthCheckSum(infoAsciiLength));
+    sendFrame.put(createLengthCheckSum(dataLen * 2));
 
-    // INFO (binary or ASCII, as provided)
-    sendFrame.put(data);
+    if (dataLen > 0) {
+        sendFrame.put(data);
+    }
 
-    // CHKSUM (ASCII) over bytes from VER through last INFO byte
-    sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
-
-    // EOI
+    sendFrame.put(createChecksum(sendFrame));
     sendFrame.put((byte) 0x0D);
 
     return sendFrame;
 }
+
 
 
 
