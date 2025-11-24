@@ -125,8 +125,8 @@ public class PylonInverterRS485Processor extends Inverter {
 
 
             
-            //final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
-            //frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
+            final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
+            frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
             
             // frames.add(prepareSendFrame(adr, (byte) 0x51, (byte) 0x00,
             // createManufacturerCode(aggregatedPack)));
@@ -143,8 +143,8 @@ public class PylonInverterRS485Processor extends Inverter {
             // frames.add(prepareSendFrame(adr, (byte) 0x63, (byte) 0x00,
             // createChargeDischargeIfno(aggregatedPack)));
 
-            //LOG.debug("Actively sending {} frames to inverter", frames.size());
-            //frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
+            LOG.debug("Actively sending {} frames to inverter", frames.size());
+            frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
     }
 
 
