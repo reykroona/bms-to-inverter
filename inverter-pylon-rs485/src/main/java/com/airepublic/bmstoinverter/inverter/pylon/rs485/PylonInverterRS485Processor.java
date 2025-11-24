@@ -115,7 +115,6 @@ public class PylonInverterRS485Processor extends Inverter {
             LOG.info("TX ASCII: {}", toAsciiString(responseFrame));
             LOG.debug("Responding to inverter with: {}", Port.printBuffer(responseFrame));
         } else {
-            
             LOG.debug("Inverter is not requesting data, no frames to send");
             // try to send data actively
 
@@ -138,7 +137,6 @@ public class PylonInverterRS485Processor extends Inverter {
 
             LOG.debug("Actively sending {} frames to inverter", frames.size());
             frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
-            
         }
 
         return frames;
