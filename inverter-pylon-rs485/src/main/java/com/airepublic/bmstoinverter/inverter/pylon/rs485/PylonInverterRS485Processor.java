@@ -695,17 +695,17 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     LOG.debug("createChargeDischargeIfno(): START for aggregatedPack = {}", aggregatedPack);
 
     // 1) Max system charge voltage (V × 0.01)
-    double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit * 100.0;
+    double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit * 30.0;
     short  maxVoltScaled  = (short) maxVoltScaledD;
-    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (x100) -> 0x{}",
+    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (x30) -> 0x{}",
               aggregatedPack.maxPackVoltageLimit, maxVoltScaled,
               String.format("%04X", maxVoltScaled));
     buffer.putShort(maxVoltScaled);
 
     // 2) Min system discharge voltage (V × 0.01)
-    double minVoltScaledD = aggregatedPack.minPackVoltageLimit * 100.0;
+    double minVoltScaledD = aggregatedPack.minPackVoltageLimit * 30.0;
     short  minVoltScaled  = (short) minVoltScaledD;
-    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (x100) -> 0x{}",
+    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (x30) -> 0x{}",
               aggregatedPack.minPackVoltageLimit, minVoltScaled,
               String.format("%04X", minVoltScaled));
     buffer.putShort(minVoltScaled);
@@ -875,44 +875,59 @@ private static String bytesToHex(byte[] bytes) {
         return builder.toString();
     }
 
-// Existing method becomes a thin wrapper (ASCII INFO by default)
+// Wrapper: default is ASCII-encoded INFO (what 4F/51/42/47/60/61 use)
 ByteBuffer prepareSendFrame(final byte address,
                             final byte cid1,
                             final byte cid2,
                             final byte[] data) {
+    // If you ever pass null, we log and return null instead of NPE
+    if (data == null) {
+        LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}): data is NULL",
+                  String.format("%02X", address),
+                  String.format("%02X", cid1),
+                  String.format("%02X", cid2));
+        return null;
+    }
     return prepareSendFrame(address, cid1, cid2, data, false);
 }
 
-// New overload: infoIsBinary = true means INFO is raw bytes (0x63 case)
+// Real implementation: can handle ASCII or BINARY INFO
 ByteBuffer prepareSendFrame(final byte address,
                             final byte cid1,
                             final byte cid2,
                             final byte[] data,
                             final boolean infoIsBinary) {
 
-    final int infoAsciiLength = infoIsBinary ? data.length * 2 : data.length;
-    final int dataLen         = data != null ? data.length : 0;
+    if (data == null) {
+        LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}, infoIsBinary={}): data is NULL",
+                  String.format("%02X", address),
+                  String.format("%02X", cid1),
+                  String.format("%02X", cid2),
+                  infoIsBinary);
+        return null;
+    }
+
+    final int dataLen         = data.length;
+    final int infoAsciiLength = infoIsBinary ? dataLen * 2 : dataLen;
 
     // 18 = SOI(1) + VER(2) + ADR(2) + CID1(2) + CID2(2) + LEN(4) + CHKSUM(4) + EOI(1)
     final ByteBuffer sendFrame = ByteBuffer.allocate(18 + dataLen)
                                            .order(ByteOrder.BIG_ENDIAN);
 
-    sendFrame.put((byte) 0x7E);        // SOI
-    sendFrame.put((byte) 0x32);        // '2'
-    sendFrame.put((byte) 0x30);        // '0'
+    sendFrame.put((byte) 0x7E); // SOI
+    sendFrame.put((byte) 0x32); // '2'
+    sendFrame.put((byte) 0x30); // '0'
 
     // ADR / CID1 / CID2 as ASCII hex
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
 
-    // LENID/LCHKSUM – in ASCII, based on number of ASCII bytes in INFO
+    // LENID / LCHKSUM – in ASCII, based on # of ASCII bytes of INFO
     sendFrame.put(createLengthCheckSum(infoAsciiLength));
 
-    // INFO (ASCII or binary depending on infoIsBinary)
-    if (dataLen > 0) {
-        sendFrame.put(data);
-    }
+    // INFO (binary or ASCII, as provided)
+    sendFrame.put(data);
 
     // CHKSUM (ASCII) over bytes from VER through last INFO byte
     sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
@@ -922,6 +937,7 @@ ByteBuffer prepareSendFrame(final byte address,
 
     return sendFrame;
 }
+
 
 
     private byte[] createChecksum(final ByteBuffer sendFrame, final int bodyLength) {
