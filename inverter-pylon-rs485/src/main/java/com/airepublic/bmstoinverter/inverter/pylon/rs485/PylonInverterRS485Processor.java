@@ -990,6 +990,7 @@ ByteBuffer prepareSendFrame(final byte address,
         sendFrame.put(data);
     }
 
+    //sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
     sendFrame.put(createChecksum(sendFrame));
     sendFrame.put((byte) 0x0D);
 
@@ -997,38 +998,32 @@ ByteBuffer prepareSendFrame(final byte address,
 }
 
 
+private byte[] createChecksum(final ByteBuffer frame) {
+    final int len = frame.position();  // everything written so far
 
+    int sum = 0;
 
-
-    private byte[] createChecksum(final ByteBuffer sendFrame, final int bodyLength) {
-        int sum = 0;
-
-        // We assume the first byte is the SOI (0x7E) and is NOT included in checksum.
-        // Only sum the ASCII bytes from VER through the last INFO byte.
-        for (int i = 1; i < bodyLength; i++) {
-            sum += sendFrame.get(i);
-        }
-
-        // Two’s complement
-        final int checksum = ~sum + 1 & 0xFFFF;
-
-        // Return as two bytes (big-endian)
-        final byte[] result = new byte[2];
-        result[0] = (byte) (checksum >> 8 & 0xFF);
-        result[1] = (byte) (checksum & 0xFF);
-
-        // convert them to ascii
-        final byte[] highBytes = ByteAsciiConverter.convertByteToAsciiBytes(result[0]);
-        final byte[] lowBytes = ByteAsciiConverter.convertByteToAsciiBytes(result[1]);
-        final byte[] data = new byte[4];
-        data[0] = highBytes[0];
-        data[1] = highBytes[1];
-        data[2] = lowBytes[0];
-        data[3] = lowBytes[1];
-
-        return data;
-
+    // Skip byte 0 (SOI)
+    for (int i = 1; i < len; i++) {
+        sum += (frame.get(i) & 0xFF);
     }
+
+    // Two’s complement
+    final int checksum = (~sum + 1) & 0xFFFF;
+
+    // Convert to ASCII hex (4 bytes)
+    byte[] out = new byte[4];
+    byte[] hi = ByteAsciiConverter.convertByteToAsciiBytes((byte) ((checksum >> 8) & 0xFF));
+    byte[] lo = ByteAsciiConverter.convertByteToAsciiBytes((byte) (checksum & 0xFF));
+
+    out[0] = hi[0];
+    out[1] = hi[1];
+    out[2] = lo[0];
+    out[3] = lo[1];
+
+    return out;
+}
+
 
 
     private byte[] createLengthCheckSum(final int infoAsciiLength) {
