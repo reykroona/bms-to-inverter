@@ -367,6 +367,69 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     return data;
 }
 
+        // 0x62
+    private byte[] createAlarms(final BatteryPack pack) {
+        final byte[] alarms = new byte[8];
+
+        // warning alarms 1
+        byte value = 0;
+        value = BitUtil.setBit(value, 7, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_HIGH) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_LOW) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_HIGH) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 4, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_LOW) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 3, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_HIGH) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 2, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_LOW) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 1, false);
+        value = BitUtil.setBit(value, 0, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_DIFFERENCE_HIGH) == AlarmLevel.WARNING);
+        byte[] bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
+        alarms[0] = bytes[0];
+        alarms[1] = bytes[1];
+
+        // warning alarms 2
+        value = 0;
+        value = BitUtil.setBit(value, 7, pack.getAlarmLevel(Alarm.TEMPERATURE_SENSOR_DIFFERENCE_HIGH) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.CHARGE_CURRENT_HIGH) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.DISCHARGE_CURRENT_HIGH) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 4, pack.getAlarmLevel(Alarm.FAILURE_COMMUNICATION_INTERNAL) == AlarmLevel.WARNING);
+        value = BitUtil.setBit(value, 3, false);
+        value = BitUtil.setBit(value, 2, false);
+        value = BitUtil.setBit(value, 1, false);
+        value = BitUtil.setBit(value, 0, false);
+        bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
+        alarms[2] = bytes[0];
+        alarms[3] = bytes[1];
+
+        // protection alarms 1
+        value = 0;
+        value = BitUtil.setBit(value, 7, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_HIGH) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.PACK_VOLTAGE_LOW) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_HIGH) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 4, pack.getAlarmLevel(Alarm.CELL_VOLTAGE_LOW) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 3, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_HIGH) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 2, pack.getAlarmLevel(Alarm.CELL_TEMPERATURE_LOW) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 1, false);
+        value = BitUtil.setBit(value, 0, false);
+        bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
+        alarms[4] = bytes[0];
+        alarms[5] = bytes[1];
+
+        // protection alarms 2
+        value = 0;
+        value = BitUtil.setBit(value, 7, false);
+        value = BitUtil.setBit(value, 6, pack.getAlarmLevel(Alarm.CHARGE_CURRENT_HIGH) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 5, pack.getAlarmLevel(Alarm.DISCHARGE_CURRENT_HIGH) == AlarmLevel.ALARM);
+        value = BitUtil.setBit(value, 4, false);
+        value = BitUtil.setBit(value, 3, pack.getAlarmLevel(Alarm.FAILURE_OTHER) == AlarmLevel.ALARM);
+        BitUtil.setBit(value, 2, false);
+        value = BitUtil.setBit(value, 1, false);
+        value = BitUtil.setBit(value, 0, false);
+        bytes = ByteAsciiConverter.convertByteToAsciiBytes(value);
+        alarms[6] = bytes[0];
+        alarms[7] = bytes[1];
+
+        return alarms;
+    }
+
 
 /**
  * CID2 = 0x63 – Charge/Discharge info.
@@ -439,6 +502,26 @@ private static byte[] bytesToAsciiHex(byte[] payload) {
 
 
 /**
+ * Convert a binary payload to ASCII hex for P3.5.
+ * e.g. [0xCB, 0x20] -> "CB20" (as bytes).
+ */
+private byte[] toAsciiHex(final byte[] payload) {
+    final byte[] ascii = new byte[payload.length * 2];
+
+    for (int i = 0; i < payload.length; i++) {
+        final int v = payload[i] & 0xFF;
+        final int hi = (v >>> 4) & 0x0F;
+        final int lo = v & 0x0F;
+
+        ascii[i * 2]     = (byte) (hi < 10 ? ('0' + hi) : ('A' + (hi - 10)));
+        ascii[i * 2 + 1] = (byte) (lo < 10 ? ('0' + lo) : ('A' + (lo - 10)));
+    }
+
+    return ascii;
+}
+
+
+    /**
  * Convert a binary payload to ASCII hex for P3.5.
  * e.g. [0xCB, 0x20] -> "CB20" (as bytes).
  */
