@@ -92,47 +92,48 @@ if (System.currentTimeMillis() - startupTime < 5000) {
             }
 
             byte[] responseData = null;
+switch (cid2) {
+    case 0x4F:
+        responseData = createProtocolVersion(aggregatedPack);
+        break;
 
-            switch (cid2) {
-                case 0x4F: // 0x4F Protocol Version
-                    responseData = createProtocolVersion(aggregatedPack);
-                break;
-                case 0x51: // 0x51 Manufacturer Code
-                    responseData = createManufacturerCode(aggregatedPack);
-                break;
-                case (byte) 0x92: // 0x92 Charge/Discharge Management Info
-                    responseData = createChargeDischargeManagementInfo(aggregatedPack);
-                break;
-                case 0x42: // 0x42 Cell Information
-                    responseData = createCellInformation(aggregatedPack);
-                break;
-                case 0x47: // 0x47 Voltage/Current Limits
-                    responseData = createVoltageCurrentLimits(aggregatedPack);
-                break;
-                case 0x60: // 0x60 System Info
-                    responseData = createSystemInfo(aggregatedPack);
-                break;
-                case 0x61: {
-                    final byte[] info61 = createBatteryInformation(aggregatedPack);
-                    LOG.debug("createBatteryInformation(): payload length = {}",
-                              info61 != null ? info61.length : -1);
-                    frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x61, info61));
-                    break;
-                    }
-                case 0x63: {
-                    final byte[] info63 = createChargeDischargeIfno(aggregatedPack);
-                    LOG.debug("createChargeDischargeIfno(): payload length = {}",
-                              info63 != null ? info63.length : -1);
-                    frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x63, info63));
-                    break;
-                }
-            
-                default:
-                    LOG.warn("Unsupported CID2 0x{}, not sending any frames",
-                             String.format("%02X", cid2));
-                    break;
-            }
+    case 0x51:
+        responseData = createManufacturerCode(aggregatedPack);
+        break;
 
+    case (byte) 0x92:
+        responseData = createChargeDischargeManagementInfo(aggregatedPack);
+        break;
+
+    case 0x42:
+        responseData = createCellInformation(aggregatedPack);
+        break;
+
+    case 0x47:
+        responseData = createVoltageCurrentLimits(aggregatedPack);
+        break;
+
+    case 0x60:
+        responseData = createSystemInfo(aggregatedPack);
+        break;
+
+    case 0x61:
+        responseData = createBatteryInformation(aggregatedPack);
+        LOG.debug("Payload 61 length = {}", 
+                   responseData != null ? responseData.length : -1);
+        break;
+
+    case 0x63:
+        responseData = createChargeDischargeIfno(aggregatedPack);
+        LOG.debug("Payload 63 length = {}", 
+                   responseData != null ? responseData.length : -1);
+        break;
+
+    default:
+        LOG.warn("Unsupported CID2 0x{}, not sending any frames",
+                 String.format("%02X", cid2));
+        break;
+}
 
 
 ByteBuffer prepareSendFrame(final byte address,
