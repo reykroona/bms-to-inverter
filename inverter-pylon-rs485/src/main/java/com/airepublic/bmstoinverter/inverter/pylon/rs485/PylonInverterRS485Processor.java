@@ -114,30 +114,13 @@ public class PylonInverterRS485Processor extends Inverter {
             frames.add(responseFrame);
             LOG.info("TX ASCII: {}", toAsciiString(responseFrame));
             LOG.debug("Responding to inverter with: {}", Port.printBuffer(responseFrame));
-        } else {
+    } else {
+        if (LOG.isDebugEnabled()) {
             LOG.debug("Inverter is not requesting data, no frames to send");
-            // try to send data actively
-
-            final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
-            frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x51, (byte) 0x00,
-            // createManufacturerCode(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x92, (byte) 0x00,
-            // createChargeDischargeManagementInfo(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x42, (byte) 0x00,
-            // createCellInformation(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x47, (byte) 0x00,
-            // createVoltageCurrentLimits(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x60, (byte) 0x00, createSystemInfo(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x61, (byte) 0x00,
-            // createBatteryInformation(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x62, (byte) 0x00, createAlarms(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x63, (byte) 0x00,
-            // createChargeDischargeIfno(aggregatedPack)));
-
-            LOG.debug("Actively sending {} frames to inverter", frames.size());
-            frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
         }
+        // no active-send frames added
+    }
+
 
         return frames;
     }
@@ -277,44 +260,44 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         return new byte[0];
     }
 
-    // 51-byte payload template copied from known-good emulator:
-    //
-    //   8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
-    //
-    // We will patch only the fields we actually care about (voltage, current, SOC, etc.).
+    // 49-byte *binary* template matching your working Python emulator:
+    // 8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
     byte[] payload = hexToBytes(
         "8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101"
     );
 
     // -----------------------------
     // Patch real values into template
+    // Offsets are in *binary* bytes
     // -----------------------------
 
     // 1) Pack voltage → 0.01 V units (uint16), bytes 0–1
-    int pv = aggregatedPack.packVoltage * 10;   // packVoltage is 0.1V → *10 → 0.01V
-    if (pv < 0) pv = 0;
-    set16(payload, 0, pv);
+    // Daly packVoltage is 0.1V units, so *10 → 0.01V.
+    int pv01V = aggregatedPack.packVoltage * 10;
+    if (pv01V < 0) pv01V = 0;
+    set16(payload, 0, pv01V);
 
-    // 2) Pack current → 0.1A units (signed), bytes 2–3
-    //    packCurrent is already in 0.1A units with sign (charge +, discharge –)
-    int pc = aggregatedPack.packCurrent;
-    set16(payload, 2, pc & 0xFFFF);
+    // 2) Pack current → 0.1A units, signed, bytes 2–3
+    // Daly packCurrent is already in 0.1A units with sign.
+    int pc01A = aggregatedPack.packCurrent;
+    set16(payload, 2, pc01A & 0xFFFF);
 
-    // 3) SOC (%) – byte 4
-    int soc = aggregatedPack.packSOC / 10;      // 0.1% → %
+    // 3) SOC (%) – byte 4 (use sanitizeSoc helper to avoid 0 / nonsense)
+    int socTenth = sanitizeSoc(aggregatedPack);   // 0.1% units
+    int soc = socTenth / 10;
     if (soc < 0) soc = 0;
     if (soc > 100) soc = 100;
     payload[4] = (byte) (soc & 0xFF);
 
     // 4) SOH (%) – byte 5
-    int soh = aggregatedPack.packSOH / 10;      // 0.1% → %
-    if (soh <= 0 || soh > 100) {
-        soh = 100;                              // default if unknown
-    }
+    int sohTenth = aggregatedPack.packSOH;        // assume 0.1% units, may be 0
+    int soh = sohTenth > 0 ? sohTenth / 10 : 100; // default to 100% if unknown
+    if (soh < 0) soh = 0;
+    if (soh > 100) soh = 100;
     payload[5] = (byte) (soh & 0xFF);
 
     // 5) Rated capacity (mAh → 0.1Ah units), bytes 6–7
-    int rated = aggregatedPack.ratedCapacitymAh / 100;
+    int rated = aggregatedPack.ratedCapacitymAh / 100;  // mAh / 100 → 0.1Ah units
     if (rated < 0) rated = 0;
     set16(payload, 6, rated);
 
@@ -323,12 +306,11 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     if (remain < 0) remain = 0;
     set16(payload, 8, remain);
 
-    // 7) Temperature: 0.1°C → Kelvin*10, bytes 10–11
-    double tempC = aggregatedPack.tempAverage / 10.0;
-    if (Double.isNaN(tempC) || tempC < -40.0 || tempC > 80.0) {
-        tempC = 25.0; // safe default
-    }
-    int tempK10 = (int) Math.round((tempC + 273.1) * 10.0);
+    // 7) Temperature: 0.1°C → protocol Kelvin*10 units, bytes 10–11
+    int tempTenthsC = sanitizeTemperature(aggregatedPack.tempAverage); // 0.1°C
+    double tempC = tempTenthsC / 10.0;
+    // Pylon: T_raw = T_C*10 + 2731
+    int tempK10 = (int) Math.round(tempC * 10.0 + 2731);
     set16(payload, 10, tempK10);
 
     // 8) Cycle count, bytes 12–13
@@ -343,9 +325,10 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     }
     payload[14] = (byte) (cellCount & 0xFF);
 
-    // The rest of the payload (bytes 15–50) is left exactly as in the emulator template.
+    // The rest of the payload (bytes 15–48) remains as in the template.
 
-    return payload; // upper layer adds "~20024661" + CRC + "\r"
+    // IMPORTANT: return INFO as ASCII hex, *not* binary.
+    return bytesToAsciiHex(payload);
 }
 
 
@@ -480,8 +463,8 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     return payload.toString().getBytes(StandardCharsets.US_ASCII);
 }
 
-    /**
- * Convert an even-length hex string to a byte array.
+/**
+ * Convert an even-length hex string to a byte array (binary).
  */
 private static byte[] hexToBytes(String hex) {
     int len = hex.length();
@@ -506,6 +489,17 @@ private static byte[] hexToBytes(String hex) {
 private static void set16(byte[] payload, int offset, int value) {
     payload[offset]     = (byte) ((value >> 8) & 0xFF);
     payload[offset + 1] = (byte) (value & 0xFF);
+}
+
+/**
+ * Convert binary bytes to ASCII hex bytes.
+ */
+private static byte[] bytesToAsciiHex(byte[] payload) {
+    StringBuilder sb = new StringBuilder(payload.length * 2);
+    for (byte b : payload) {
+        sb.append(String.format("%02X", b & 0xFF));
+    }
+    return sb.toString().getBytes(StandardCharsets.US_ASCII);
 }
 
 
