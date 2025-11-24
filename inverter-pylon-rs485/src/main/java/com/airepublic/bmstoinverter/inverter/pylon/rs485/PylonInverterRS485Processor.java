@@ -112,65 +112,66 @@ if (System.currentTimeMillis() - startupTime < 5000) {
                 case 0x60: // 0x60 System Info
                     responseData = createSystemInfo(aggregatedPack);
                 break;
-
-
-    case 0x61:
-        frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x61,
-            createBatteryInformation(aggregatedPack)));
-        break;
-                case 0x62:
-                    responseData = createAlarms(aggregatedPack);
-                break; // 0x62 Alarms
-    case 0x63:
-        frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x63,
-            createChargeDischargeIfno(aggregatedPack)));
-        break;
-
+                case 0x61: {
+                    final byte[] info61 = createBatteryInformation(aggregatedPack);
+                    LOG.debug("createBatteryInformation(): payload length = {}",
+                              info61 != null ? info61.length : -1);
+                    frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x61, info61));
+                    break;
+                    }
+                case 0x63: {
+                    final byte[] info63 = createChargeDischargeIfno(aggregatedPack);
+                    LOG.debug("createChargeDischargeIfno(): payload length = {}",
+                              info63 != null ? info63.length : -1);
+                    frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x63, info63));
+                    break;
+                }
+            
                 default:
-                    // not supported
-                    return frames;
+                    LOG.warn("Unsupported CID2 0x{}, not sending any frames",
+                             String.format("%02X", cid2));
+                    break;
             }
 
-            final ByteBuffer responseFrame = prepareSendFrame(adr, cid1, (byte) 0x00, responseData);
-            frames.add(responseFrame);
-            LOG.info("TX ASCII: {}", toAsciiString(responseFrame));
-            LOG.debug("Responding to inverter with: {}", Port.printBuffer(responseFrame));
-    } else {
-            LOG.debug("Inverter is not requesting data, no frames to send");
-            // try to send data actively
-            try {
-            Thread.sleep(5); // 5 ms is usually plenty; you can try 2–10 ms
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
 
 
-            
-            //final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
-            //frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
-            
-            // frames.add(prepareSendFrame(adr, (byte) 0x51, (byte) 0x00,
-            // createManufacturerCode(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x92, (byte) 0x00,
-            // createChargeDischargeManagementInfo(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x42, (byte) 0x00,
-            // createCellInformation(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x47, (byte) 0x00,
-            // createVoltageCurrentLimits(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x60, (byte) 0x00, createSystemInfo(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x61, (byte) 0x00,
-            // createBatteryInformation(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x62, (byte) 0x00, createAlarms(aggregatedPack)));
-            // frames.add(prepareSendFrame(adr, (byte) 0x63, (byte) 0x00,
-            // createChargeDischargeIfno(aggregatedPack)));
+ByteBuffer prepareSendFrame(final byte address,
+                            final byte cid1,
+                            final byte cid2,
+                            final byte[] data) {
+    final int dataLen = (data != null) ? data.length : 0;
 
-            LOG.debug("Actively sending {} frames to inverter", frames.size());
-            //frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
+    // 18 = SOI + VER + ADR + CID1 + CID2 + LEN(2) + CHKSUM(2) + EOI
+    final ByteBuffer sendFrame = ByteBuffer
+            .allocate(18 + dataLen)
+            .order(ByteOrder.BIG_ENDIAN);
+
+    sendFrame.put((byte) 0x7E); // SOI
+    sendFrame.put((byte) 0x32); // '2'
+    sendFrame.put((byte) 0x30); // '0'
+
+    // ADR, CID1, CID2 as ASCII hex
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
+
+    // LENGTH in ASCII, LENID/2, so we multiply by 2 for ASCII nibbles
+    sendFrame.put(createLengthCheckSum(dataLen * 2));
+
+    // INFO payload (may be empty)
+    if (dataLen > 0) {
+        sendFrame.put(data);
     }
 
+    // CHKSUM over everything from VER to last INFO byte
+    sendFrame.put(createChecksum(sendFrame));
 
-        return frames;
-    }
+    // EOI
+    sendFrame.put((byte) 0x0D);
+
+    return sendFrame;
+}
+
 
     
     private String toAsciiString(final ByteBuffer buffer) {
