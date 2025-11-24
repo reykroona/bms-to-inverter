@@ -40,6 +40,7 @@ public class PylonInverterRS485Processor extends Inverter {
     private static final double DEFAULT_CURRENT_LIMIT_A = 20.0;
     private static final int DEFAULT_SOC_TENTHS = 800;
     private static final int DEFAULT_TEMPERATURE_TENTHS = 250;
+    private long startupTime = System.currentTimeMillis();
 
     public PylonInverterRS485Processor() {
         super();
@@ -54,6 +55,22 @@ public class PylonInverterRS485Processor extends Inverter {
     @Override
     protected List<ByteBuffer> createSendFrames(final ByteBuffer requestFrame, final BatteryPack aggregatedPack) {
         final List<ByteBuffer> frames = new ArrayList<>();
+// Warm-up period for the first 5 seconds after boot
+if (System.currentTimeMillis() - startupTime < 5000) {
+    LOG.debug("Warm-up: sending fake startup frame to trigger inverter polling");
+
+    final byte adr = (byte)0x02;
+
+    ByteBuffer warm = prepareSendFrame(
+        adr,
+        (byte)0x63,   // CID2
+        (byte)0x00,   // RTN
+        createChargeDischargeIfno(aggregatedPack) // ASCII HEX
+    );
+
+    frames.add(warm);
+    return frames;
+}
 
         // check if the inverter is actively requesting data
         if (requestFrame != null) {
@@ -144,7 +161,7 @@ public class PylonInverterRS485Processor extends Inverter {
             // createChargeDischargeIfno(aggregatedPack)));
 
             LOG.debug("Actively sending {} frames to inverter", frames.size());
-            frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
+            //frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
     }
 
 
