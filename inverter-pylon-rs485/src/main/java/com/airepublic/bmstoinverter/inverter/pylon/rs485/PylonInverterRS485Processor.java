@@ -519,27 +519,6 @@ private byte[] toAsciiHex(final byte[] payload) {
 
     return ascii;
 }
-
-
-    /**
- * Convert a binary payload to ASCII hex for P3.5.
- * e.g. [0xCB, 0x20] -> "CB20" (as bytes).
- */
-private byte[] toAsciiHex(final byte[] payload) {
-    final byte[] ascii = new byte[payload.length * 2];
-
-    for (int i = 0; i < payload.length; i++) {
-        final int v = payload[i] & 0xFF;
-        final int hi = (v >>> 4) & 0x0F;
-        final int lo = v & 0x0F;
-
-        ascii[i * 2]     = (byte) (hi < 10 ? ('0' + hi) : ('A' + (hi - 10)));
-        ascii[i * 2 + 1] = (byte) (lo < 10 ? ('0' + lo) : ('A' + (lo - 10)));
-    }
-
-    return ascii;
-}
-
     
 @Override
 protected ByteBuffer readRequest(final Port port) throws IOException {
