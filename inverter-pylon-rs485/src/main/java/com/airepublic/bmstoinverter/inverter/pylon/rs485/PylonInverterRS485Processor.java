@@ -369,111 +369,166 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 
     LOG.debug("createBatteryInformation(): START for aggregatedPack = {}", aggregatedPack);
 
-// right at the top of createBatteryInformation(...)
-int tempAvgTenth = aggregatedPack.tempAverage;
-if (tempAvgTenth == 0) {
-    // rough: mid between pack tempMin and tempMax
-    tempAvgTenth = (aggregatedPack.tempMin + aggregatedPack.tempMax) / 2;
-}
+    // --------------------------------------------------------------------
+    // Interpret tempAverage safely: if it's 0, approximate as midpoint
+    // between tempMin and tempMax
+    // aggregatedPack.* temps are in 0.1°C units
+    // --------------------------------------------------------------------
+    int tempAvgTenth = aggregatedPack.tempAverage;
+    if (tempAvgTenth == 0) {
+        tempAvgTenth = (aggregatedPack.tempMin + aggregatedPack.tempMax) / 2;
+        LOG.debug("tempAverage was 0; approximated as midpoint: rawMid={} (0.1°C) ≈ {} °C",
+                tempAvgTenth, tempAvgTenth / 10.0);
+    }
 
-    
-    // --------- PACK VOLTAGE ----------
+    // ========== PACK VOLTAGE ==========
+    // aggregatedPack.packVoltage seems to be in 0.1 V units (e.g. 536 => 53.6 V)
     int startPos = buffer.position();
-    int packVoltageScaled = (int) (aggregatedPack.packVoltage * 10);
+    double packVoltageRealV = aggregatedPack.packVoltage / 10.0; // human-readable volts
+    int packVoltageScaled = (int) (packVoltageRealV * 10);        // 0.1 V resolution for Pylon
     byte[] packVoltageBytes = ByteAsciiConverter.convertCharToAsciiBytes((char) packVoltageScaled);
-    LOG.debug("packVoltage: raw={} V, scaled={} (x10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.packVoltage, packVoltageScaled, bytesToHex(packVoltageBytes),
-            packVoltageBytes.length, startPos);
+
+    LOG.debug(
+        "packVoltage: raw={} (0.1V units) -> approxReal={} V, encodedScaled={} (0.1V units), " +
+        "encodedHex=0x{} asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.packVoltage,
+        packVoltageRealV,
+        packVoltageScaled,
+        String.format("%04X", packVoltageScaled),
+        bytesToHex(packVoltageBytes),
+        packVoltageBytes.length,
+        startPos
+    );
     buffer.put(packVoltageBytes);
 
-    // --------- PACK CURRENT ----------
+    // ========== PACK CURRENT ==========
+    // aggregatedPack.packCurrent appears to be in 0.1 A units (e.g. 178 => 17.8 A)
     startPos = buffer.position();
-    short packCurrentScaled = (short) (aggregatedPack.packCurrent / 10);
+    double packCurrentRealA = aggregatedPack.packCurrent / 10.0; // human-readable amps
+    // For now we encode in 0.1 A units as a short (Pylon expects signed current)
+    short packCurrentScaled = (short) aggregatedPack.packCurrent;
     byte[] packCurrentBytes = ByteAsciiConverter.convertShortToAsciiBytes(packCurrentScaled);
-    LOG.debug("packCurrent: raw={} A, scaled={} (/10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.packCurrent, packCurrentScaled, bytesToHex(packCurrentBytes),
-            packCurrentBytes.length, startPos);
+
+    LOG.debug(
+        "packCurrent: raw={} (0.1A units) -> approxReal={} A, encodedScaled={} (0.1A), " +
+        "encodedHex=0x{} asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.packCurrent,
+        packCurrentRealA,
+        packCurrentScaled,
+        String.format("%04X", packCurrentScaled & 0xFFFF),
+        bytesToHex(packCurrentBytes),
+        packCurrentBytes.length,
+        startPos
+    );
     buffer.put(packCurrentBytes);
 
-    // --------- PACK SOC ----------
+    // ========== PACK SOC ==========
+    // aggregatedPack.packSOC seems to be in 0.1 % units (e.g. 893 => 89.3%)
     startPos = buffer.position();
-    byte packSocScaled = (byte) (aggregatedPack.packSOC / 10);
+    double socRealPct = aggregatedPack.packSOC / 10.0;
+    byte packSocScaled = (byte) (aggregatedPack.packSOC / 10); // integer %
     byte[] packSocBytes = ByteAsciiConverter.convertByteToAsciiBytes(packSocScaled);
-    LOG.debug("packSOC: raw={} %, scaled={} (/10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.packSOC, packSocScaled, bytesToHex(packSocBytes),
-            packSocBytes.length, startPos);
+
+    LOG.debug(
+        "packSOC: raw={} (0.1%% units) -> approxReal={} %%, encodedScaled={} (1%%), asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.packSOC,
+        socRealPct,
+        packSocScaled,
+        bytesToHex(packSocBytes),
+        packSocBytes.length,
+        startPos
+    );
     buffer.put(packSocBytes);
 
-    // --------- BMS CYCLES (AVERAGE) ----------
+    // ========== BMS CYCLES (AVERAGE) ==========
     startPos = buffer.position();
     short avgCycles = (short) aggregatedPack.bmsCycles;
     byte[] avgCyclesBytes = ByteAsciiConverter.convertShortToAsciiBytes(avgCycles);
-    LOG.debug("bmsCycles (avg): raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("bmsCycles (avg): raw={} cycles, asciiBytes={} (len={}, startPos={})",
             aggregatedPack.bmsCycles, bytesToHex(avgCyclesBytes),
             avgCyclesBytes.length, startPos);
     buffer.put(avgCyclesBytes);
 
-    // --------- BMS CYCLES (MAX = 10000) ----------
+    // ========== BMS CYCLES (MAX = 10000) ==========
     startPos = buffer.position();
     short maxCycles = (short) 10000;
     byte[] maxCyclesBytes = ByteAsciiConverter.convertShortToAsciiBytes(maxCycles);
-    LOG.debug("bmsCycles (max): raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("bmsCycles (max): fixedRaw={} cycles, asciiBytes={} (len={}, startPos={})",
             maxCycles, bytesToHex(maxCyclesBytes),
             maxCyclesBytes.length, startPos);
     buffer.put(maxCyclesBytes);
 
-    // --------- SOH (AVERAGE & LOWEST) ----------
+    // ========== SOH (AVERAGE & LOWEST) ==========
+    // aggregatedPack.packSOH is in 0.1 % units
     startPos = buffer.position();
+    double sohRealPct = aggregatedPack.packSOH / 10.0;
     byte sohAvgScaled = (byte) Math.max(1, Math.min(100, aggregatedPack.packSOH / 10));
     byte[] sohAvgBytes = ByteAsciiConverter.convertByteToAsciiBytes(sohAvgScaled);
-    LOG.debug("packSOH (avg): raw={} %, scaled={} (/10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.packSOH, sohAvgScaled, bytesToHex(sohAvgBytes),
-            sohAvgBytes.length, startPos);
+    LOG.debug(
+        "packSOH (avg): raw={} (0.1%% units) -> approxReal={} %%, encodedScaled={} (1%%), asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.packSOH,
+        sohRealPct,
+        sohAvgScaled,
+        bytesToHex(sohAvgBytes),
+        sohAvgBytes.length,
+        startPos
+    );
     buffer.put(sohAvgBytes);
 
     startPos = buffer.position();
     byte sohLowScaled = (byte) (aggregatedPack.packSOH / 10); // same as avg in your code
     byte[] sohLowBytes = ByteAsciiConverter.convertByteToAsciiBytes(sohLowScaled);
-    LOG.debug("packSOH (low): raw={} %, scaled={} (/10), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.packSOH, sohLowScaled, bytesToHex(sohLowBytes),
-            sohLowBytes.length, startPos);
+    LOG.debug(
+        "packSOH (low): raw={} (0.1%% units) -> approxReal={} %%, encodedScaled={} (1%%), asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.packSOH,
+        sohRealPct,
+        sohLowScaled,
+        bytesToHex(sohLowBytes),
+        sohLowBytes.length,
+        startPos
+    );
     buffer.put(sohLowBytes);
 
-    // --------- FIND PACK WITH MAX/MIN CELL VOLTAGE ----------
+    // ========== FIND PACK WITH MAX/MIN CELL VOLTAGE ==========
     int maxPack = 0;
     int minPack = 0;
 
-    LOG.debug("Searching packs for max/min cell mV. aggregatedPack.maxCellmV={}, minCellmV={}",
+    LOG.debug("Searching packs for max/min cell mV. aggregatedPack.maxCellmV={} mV, minCellmV={} mV",
             aggregatedPack.maxCellmV, aggregatedPack.minCellmV);
 
     for (int i = 0; i < getEnergyStorage().getBatteryPacks().size(); i++) {
         final BatteryPack pack = getEnergyStorage().getBatteryPack(i);
-        LOG.debug("Pack[{}]: maxCellmV={}, minCellmV={}", i, pack.maxCellmV, pack.minCellmV);
+        LOG.debug("Pack[{}]: maxCellmV={} mV, minCellmV={} mV", i, pack.maxCellmV, pack.minCellmV);
 
         if (pack.maxCellmV == aggregatedPack.maxCellmV) {
             maxPack = i;
         }
-
         if (pack.minCellmV == aggregatedPack.minCellmV) {
             minPack = i;
         }
     }
 
-    LOG.debug("maxPack index={}, minPack index={}", maxPack, minPack);
+    LOG.debug("maxPack index={} (maxCellmV), minPack index={} (minCellmV)", maxPack, minPack);
 
-    // --------- MAX CELL VOLTAGE & LOCATION ----------
+    // ========== MAX CELL VOLTAGE & LOCATION ==========
     startPos = buffer.position();
     short maxCellmV = (short) aggregatedPack.maxCellmV;
     byte[] maxCellBytes = ByteAsciiConverter.convertShortToAsciiBytes(maxCellmV);
-    LOG.debug("maxCellmV: raw={} mV, asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.maxCellmV, bytesToHex(maxCellBytes),
-            maxCellBytes.length, startPos);
+    LOG.debug(
+        "maxCellmV: raw={} mV -> approxReal={} V, encodedHex=0x{}, asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.maxCellmV,
+        aggregatedPack.maxCellmV / 1000.0,
+        String.format("%04X", maxCellmV & 0xFFFF),
+        bytesToHex(maxCellBytes),
+        maxCellBytes.length,
+        startPos
+    );
     buffer.put(maxCellBytes);
 
     startPos = buffer.position();
     byte maxPackByte = (byte) maxPack;
     byte[] maxPackBytes = ByteAsciiConverter.convertByteToAsciiBytes(maxPackByte);
-    LOG.debug("maxCellV packIndex: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("maxCellV packIndex: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             maxPackByte, bytesToHex(maxPackBytes),
             maxPackBytes.length, startPos);
     buffer.put(maxPackBytes);
@@ -481,24 +536,30 @@ if (tempAvgTenth == 0) {
     startPos = buffer.position();
     byte maxCellVNum = (byte) aggregatedPack.maxCellVNum;
     byte[] maxCellVNumBytes = ByteAsciiConverter.convertByteToAsciiBytes(maxCellVNum);
-    LOG.debug("maxCellV cellNum: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("maxCellV cellNum: rawCellIndex={}, asciiBytes={} (len={}, startPos={})",
             aggregatedPack.maxCellVNum, bytesToHex(maxCellVNumBytes),
             maxCellVNumBytes.length, startPos);
     buffer.put(maxCellVNumBytes);
 
-    // --------- MIN CELL VOLTAGE & LOCATION ----------
+    // ========== MIN CELL VOLTAGE & LOCATION ==========
     startPos = buffer.position();
     short minCellmV = (short) aggregatedPack.minCellmV;
     byte[] minCellBytes = ByteAsciiConverter.convertShortToAsciiBytes(minCellmV);
-    LOG.debug("minCellmV: raw={} mV, asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.minCellmV, bytesToHex(minCellBytes),
-            minCellBytes.length, startPos);
+    LOG.debug(
+        "minCellmV: raw={} mV -> approxReal={} V, encodedHex=0x{}, asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.minCellmV,
+        aggregatedPack.minCellmV / 1000.0,
+        String.format("%04X", minCellmV & 0xFFFF),
+        bytesToHex(minCellBytes),
+        minCellBytes.length,
+        startPos
+    );
     buffer.put(minCellBytes);
 
     startPos = buffer.position();
     byte minPackByte = (byte) minPack;
     byte[] minPackBytes = ByteAsciiConverter.convertByteToAsciiBytes(minPackByte);
-    LOG.debug("minCellV packIndex: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("minCellV packIndex: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             minPackByte, bytesToHex(minPackBytes),
             minPackBytes.length, startPos);
     buffer.put(minPackBytes);
@@ -506,55 +567,69 @@ if (tempAvgTenth == 0) {
     startPos = buffer.position();
     byte minCellVNum = (byte) aggregatedPack.minCellVNum;
     byte[] minCellVNumBytes = ByteAsciiConverter.convertByteToAsciiBytes(minCellVNum);
-    LOG.debug("minCellV cellNum: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("minCellV cellNum: rawCellIndex={}, asciiBytes={} (len={}, startPos={})",
             aggregatedPack.minCellVNum, bytesToHex(minCellVNumBytes),
             minCellVNumBytes.length, startPos);
     buffer.put(minCellVNumBytes);
 
-    // --------- AVERAGE TEMPERATURE ----------
+    // ========== AVERAGE TEMPERATURE ==========
+    // Temps are in 0.1°C units; we shift +273.1°C in 0.1°C units => +2731
     startPos = buffer.position();
-short tempAverageK = (short) (tempAvgTenth + 2731);
+    short tempAverageK = (short) (tempAvgTenth + 2731);
     byte[] tempAverageBytes = ByteAsciiConverter.convertShortToAsciiBytes(tempAverageK);
-    LOG.debug("tempAverage: raw={} (0.1°C?), shifted={} (+2731), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.tempAverage, tempAverageK, bytesToHex(tempAverageBytes),
-            tempAverageBytes.length, startPos);
+    LOG.debug(
+        "tempAverage: raw={} (0.1°C) -> approxReal={} °C, shiftedRaw={} (+2731), asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.tempAverage,
+        tempAvgTenth / 10.0,
+        tempAverageK,
+        bytesToHex(tempAverageBytes),
+        tempAverageBytes.length,
+        startPos
+    );
     buffer.put(tempAverageBytes);
 
-    // --------- FIND PACK WITH MAX/MIN TEMPERATURE ----------
+    // ========== FIND PACK WITH MAX/MIN TEMPERATURE ==========
     maxPack = 0;
     minPack = 0;
 
-    LOG.debug("Searching packs for max/min temp. aggregatedPack.tempMax={}, tempMin={}",
+    LOG.debug("Searching packs for max/min temp. aggregatedPack.tempMax={} (0.1°C), tempMin={} (0.1°C)",
             aggregatedPack.tempMax, aggregatedPack.tempMin);
 
     for (int i = 0; i < getEnergyStorage().getBatteryPacks().size(); i++) {
         final BatteryPack pack = getEnergyStorage().getBatteryPack(i);
-        LOG.debug("Pack[{}]: tempMax={}, tempMin={}", i, pack.tempMax, pack.tempMin);
+        LOG.debug("Pack[{}]: tempMax={} (0.1°C) ≈ {} °C, tempMin={} (0.1°C) ≈ {} °C",
+                i, pack.tempMax, pack.tempMax / 10.0,
+                pack.tempMin, pack.tempMin / 10.0);
 
         if (pack.tempMax == aggregatedPack.tempMax) {
             maxPack = i;
         }
-
         if (pack.tempMin == aggregatedPack.tempMin) {
             minPack = i;
         }
     }
 
-    LOG.debug("temp maxPack index={}, minPack index={}", maxPack, minPack);
+    LOG.debug("temp maxPack index={} (tempMax), minPack index={} (tempMin)", maxPack, minPack);
 
-    // --------- MAX TEMP & LOCATION ----------
+    // ========== MAX TEMP & LOCATION ==========
     startPos = buffer.position();
     short tempMaxK = (short) (aggregatedPack.tempMax + 2731);
     byte[] tempMaxBytes = ByteAsciiConverter.convertShortToAsciiBytes(tempMaxK);
-    LOG.debug("tempMax: raw={}, shifted={} (+2731), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.tempMax, tempMaxK, bytesToHex(tempMaxBytes),
-            tempMaxBytes.length, startPos);
+    LOG.debug(
+        "tempMax: raw={} (0.1°C) -> approxReal={} °C, shiftedRaw={} (+2731), asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.tempMax,
+        aggregatedPack.tempMax / 10.0,
+        tempMaxK,
+        bytesToHex(tempMaxBytes),
+        tempMaxBytes.length,
+        startPos
+    );
     buffer.put(tempMaxBytes);
 
     startPos = buffer.position();
     byte tempMaxPackByte = (byte) maxPack;
     byte[] tempMaxPackBytes = ByteAsciiConverter.convertByteToAsciiBytes(tempMaxPackByte);
-    LOG.debug("tempMax packIndex: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("tempMax packIndex: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             tempMaxPackByte, bytesToHex(tempMaxPackBytes),
             tempMaxPackBytes.length, startPos);
     buffer.put(tempMaxPackBytes);
@@ -562,24 +637,30 @@ short tempAverageK = (short) (tempAvgTenth + 2731);
     startPos = buffer.position();
     byte tempMaxCellNum = (byte) aggregatedPack.tempMaxCellNum;
     byte[] tempMaxCellNumBytes = ByteAsciiConverter.convertByteToAsciiBytes(tempMaxCellNum);
-    LOG.debug("tempMax cellNum: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("tempMax cellNum: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             aggregatedPack.tempMaxCellNum, bytesToHex(tempMaxCellNumBytes),
             tempMaxCellNumBytes.length, startPos);
     buffer.put(tempMaxCellNumBytes);
 
-    // --------- MIN TEMP & LOCATION ----------
+    // ========== MIN TEMP & LOCATION ==========
     startPos = buffer.position();
     short tempMinK = (short) (aggregatedPack.tempMin + 2731);
     byte[] tempMinBytes = ByteAsciiConverter.convertShortToAsciiBytes(tempMinK);
-    LOG.debug("tempMin: raw={}, shifted={} (+2731), asciiBytes={} (len={}, startPos={})",
-            aggregatedPack.tempMin, tempMinK, bytesToHex(tempMinBytes),
-            tempMinBytes.length, startPos);
+    LOG.debug(
+        "tempMin: raw={} (0.1°C) -> approxReal={} °C, shiftedRaw={} (+2731), asciiBytes={} (len={}, startPos={})",
+        aggregatedPack.tempMin,
+        aggregatedPack.tempMin / 10.0,
+        tempMinK,
+        bytesToHex(tempMinBytes),
+        tempMinBytes.length,
+        startPos
+    );
     buffer.put(tempMinBytes);
 
     startPos = buffer.position();
     byte tempMinPackByte = (byte) minPack;
     byte[] tempMinPackBytes = ByteAsciiConverter.convertByteToAsciiBytes(tempMinPackByte);
-    LOG.debug("tempMin packIndex: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("tempMin packIndex: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             tempMinPackByte, bytesToHex(tempMinPackBytes),
             tempMinPackBytes.length, startPos);
     buffer.put(tempMinPackBytes);
@@ -587,94 +668,98 @@ short tempAverageK = (short) (tempAvgTenth + 2731);
     startPos = buffer.position();
     byte tempMinCellNum = (byte) aggregatedPack.tempMinCellNum;
     byte[] tempMinCellNumBytes = ByteAsciiConverter.convertByteToAsciiBytes(tempMinCellNum);
-    LOG.debug("tempMin cellNum: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("tempMin cellNum: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             aggregatedPack.tempMinCellNum, bytesToHex(tempMinCellNumBytes),
             tempMinCellNumBytes.length, startPos);
     buffer.put(tempMinCellNumBytes);
 
-    // --------- MOSFET TEMPERATURES ----------
-    short mosfetAvgK = (short) (aggregatedPack.tempAverage + 2731);
+    // ========== MOSFET TEMPERATURES ==========
+    short mosfetAvgK = (short) (tempAvgTenth + 2731);
     short mosfetMaxK = mosfetAvgK;
     short mosfetMinK = mosfetAvgK;
     short mosfetPackIdx = 0;
 
     startPos = buffer.position();
     byte[] mosfetAvgBytes = ByteAsciiConverter.convertShortToAsciiBytes(mosfetAvgK);
-    LOG.debug("MOSFET tempAverage: shifted={}, asciiBytes={} (len={}, startPos={})",
-            mosfetAvgK, bytesToHex(mosfetAvgBytes),
-            mosfetAvgBytes.length, startPos);
+    LOG.debug("MOSFET tempAverage: rawMid={} (0.1°C) -> approxReal={} °C, shiftedRaw={}, asciiBytes={} (len={}, startPos={})",
+            tempAvgTenth,
+            tempAvgTenth / 10.0,
+            mosfetAvgK,
+            bytesToHex(mosfetAvgBytes),
+            mosfetAvgBytes.length,
+            startPos);
     buffer.put(mosfetAvgBytes);
 
     startPos = buffer.position();
     byte[] mosfetMaxBytes = ByteAsciiConverter.convertShortToAsciiBytes(mosfetMaxK);
-    LOG.debug("MOSFET tempMax: shifted={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("MOSFET tempMax: same as avg, shiftedRaw={}, asciiBytes={} (len={}, startPos={})",
             mosfetMaxK, bytesToHex(mosfetMaxBytes),
             mosfetMaxBytes.length, startPos);
     buffer.put(mosfetMaxBytes);
 
     startPos = buffer.position();
     byte[] mosfetMaxPackBytes = ByteAsciiConverter.convertShortToAsciiBytes(mosfetPackIdx);
-    LOG.debug("MOSFET tempMax pack: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("MOSFET tempMax pack: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             mosfetPackIdx, bytesToHex(mosfetMaxPackBytes),
             mosfetMaxPackBytes.length, startPos);
     buffer.put(mosfetMaxPackBytes);
 
     startPos = buffer.position();
     byte[] mosfetMinBytes = ByteAsciiConverter.convertShortToAsciiBytes(mosfetMinK);
-    LOG.debug("MOSFET tempMin: shifted={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("MOSFET tempMin: same as avg, shiftedRaw={}, asciiBytes={} (len={}, startPos={})",
             mosfetMinK, bytesToHex(mosfetMinBytes),
             mosfetMinBytes.length, startPos);
     buffer.put(mosfetMinBytes);
 
     startPos = buffer.position();
     byte[] mosfetMinPackBytes = ByteAsciiConverter.convertShortToAsciiBytes(mosfetPackIdx);
-    LOG.debug("MOSFET tempMin pack: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("MOSFET tempMin pack: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             mosfetPackIdx, bytesToHex(mosfetMinPackBytes),
             mosfetMinPackBytes.length, startPos);
     buffer.put(mosfetMinPackBytes);
 
-    // --------- BMS TEMPERATURES ----------
-    short bmsAvgK = (short) (aggregatedPack.tempAverage + 2731);
+    // ========== BMS TEMPERATURES ==========
+    short bmsAvgK = mosfetAvgK;
     short bmsMaxK = bmsAvgK;
     short bmsMinK = bmsAvgK;
     short bmsPackIdx = 0;
 
     startPos = buffer.position();
     byte[] bmsAvgBytes = ByteAsciiConverter.convertShortToAsciiBytes(bmsAvgK);
-    LOG.debug("BMS tempAverage: shifted={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("BMS tempAverage: shiftedRaw={}, asciiBytes={} (len={}, startPos={})",
             bmsAvgK, bytesToHex(bmsAvgBytes),
             bmsAvgBytes.length, startPos);
     buffer.put(bmsAvgBytes);
 
     startPos = buffer.position();
     byte[] bmsMaxBytes = ByteAsciiConverter.convertShortToAsciiBytes(bmsMaxK);
-    LOG.debug("BMS tempMax: shifted={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("BMS tempMax: same as avg, shiftedRaw={}, asciiBytes={} (len={}, startPos={})",
             bmsMaxK, bytesToHex(bmsMaxBytes),
             bmsMaxBytes.length, startPos);
     buffer.put(bmsMaxBytes);
 
     startPos = buffer.position();
     byte[] bmsMaxPackBytes = ByteAsciiConverter.convertShortToAsciiBytes(bmsPackIdx);
-    LOG.debug("BMS tempMax pack: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("BMS tempMax pack: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             bmsPackIdx, bytesToHex(bmsMaxPackBytes),
             bmsMaxPackBytes.length, startPos);
     buffer.put(bmsMaxPackBytes);
 
     startPos = buffer.position();
     byte[] bmsMinBytes = ByteAsciiConverter.convertShortToAsciiBytes(bmsMinK);
-    LOG.debug("BMS tempMin: shifted={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("BMS tempMin: same as avg, shiftedRaw={}, asciiBytes={} (len={}, startPos={})",
             bmsMinK, bytesToHex(bmsMinBytes),
             bmsMinBytes.length, startPos);
     buffer.put(bmsMinBytes);
 
     startPos = buffer.position();
     byte[] bmsMinPackBytes = ByteAsciiConverter.convertShortToAsciiBytes(bmsPackIdx);
-    LOG.debug("BMS tempMin pack: raw={}, asciiBytes={} (len={}, startPos={})",
+    LOG.debug("BMS tempMin pack: rawIndex={}, asciiBytes={} (len={}, startPos={})",
             bmsPackIdx, bytesToHex(bmsMinPackBytes),
             bmsMinPackBytes.length, startPos);
     buffer.put(bmsMinPackBytes);
 
-    // ✅ IMPORTANT: capture length before flip
+    // ---------- Finalize ----------
     final int length = buffer.position();
     buffer.flip();
 
@@ -686,6 +771,7 @@ short tempAverageK = (short) (tempAvgTenth + 2731);
 
     return data;
 }
+
 
 
     // 0x62
@@ -758,57 +844,87 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
 
     LOG.debug("createChargeDischargeIfno(): START for aggregatedPack = {}", aggregatedPack);
 
-    // 1) Max system charge voltage (V × 0.01)
+    // ----- 1) Max system charge voltage -----
+    // aggregatedPack.maxPackVoltageLimit appears to be in 0.1 V units (e.g. 573 => 57.3 V)
+    double maxVoltRealV = aggregatedPack.maxPackVoltageLimit / 10.0;
+    // Empirical trick you discovered: divide by 3 to get a HV-ish value the inverter likes
     double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit / 3.0;
     short  maxVoltScaled  = (short) maxVoltScaledD;
-    LOG.debug("maxPackVoltageLimit: raw={} V, scaled={} (/3) -> 0x{}",
-              aggregatedPack.maxPackVoltageLimit, maxVoltScaled,
-              String.format("%04X", maxVoltScaled));
+
+    LOG.debug(
+        "maxPackVoltageLimit: raw={} (0.1V units) -> approxReal={} V, encodedScaled={} (raw/3), encodedHex=0x{}",
+        aggregatedPack.maxPackVoltageLimit,
+        maxVoltRealV,
+        maxVoltScaled,
+        String.format("%04X", maxVoltScaled & 0xFFFF)
+    );
     buffer.putShort(maxVoltScaled);
 
-    // 2) Min system discharge voltage (V × 0.01)
+    // ----- 2) Min system discharge voltage -----
+    double minVoltRealV = aggregatedPack.minPackVoltageLimit / 10.0;
     double minVoltScaledD = aggregatedPack.minPackVoltageLimit / 3.0;
     short  minVoltScaled  = (short) minVoltScaledD;
-    LOG.debug("minPackVoltageLimit: raw={} V, scaled={} (/3) -> 0x{}",
-              aggregatedPack.minPackVoltageLimit, minVoltScaled,
-              String.format("%04X", minVoltScaled));
+
+    LOG.debug(
+        "minPackVoltageLimit: raw={} (0.1V units) -> approxReal={} V, encodedScaled={} (raw/3), encodedHex=0x{}",
+        aggregatedPack.minPackVoltageLimit,
+        minVoltRealV,
+        minVoltScaled,
+        String.format("%04X", minVoltScaled & 0xFFFF)
+    );
     buffer.putShort(minVoltScaled);
 
-    // 3) Max charge current (A × 0.1)
-    double maxChargeCurrentScaledD = aggregatedPack.maxPackChargeCurrent * 10.0;
+    // ----- 3) Max charge current -----
+    // aggregatedPack.maxPackChargeCurrent in A (or 0.1A depending on upstream).
+    // Here we assume it is in amps and we encode in 0.1A units (×10).
+    double maxChargeCurrentRealA = aggregatedPack.maxPackChargeCurrent;
+    double maxChargeCurrentScaledD = maxChargeCurrentRealA * 10.0;
     short  maxChargeCurrentScaled  = (short) maxChargeCurrentScaledD;
-    LOG.debug("maxPackChargeCurrent: raw={} A, scaled={} (x10) -> 0x{}",
-              aggregatedPack.maxPackChargeCurrent, maxChargeCurrentScaled,
-              String.format("%04X", maxChargeCurrentScaled));
+
+    LOG.debug(
+        "maxPackChargeCurrent: raw={} A -> encodedScaled={} (0.1A units), encodedHex=0x{}",
+        aggregatedPack.maxPackChargeCurrent,
+        maxChargeCurrentScaled,
+        String.format("%04X", maxChargeCurrentScaled & 0xFFFF)
+    );
     buffer.putShort(maxChargeCurrentScaled);
 
-    // 4) Max discharge current (A × 0.1)
-    double maxDischargeCurrentScaledD = aggregatedPack.maxPackDischargeCurrent * 10.0;
+    // ----- 4) Max discharge current -----
+    double maxDischargeCurrentRealA = aggregatedPack.maxPackDischargeCurrent;
+    double maxDischargeCurrentScaledD = maxDischargeCurrentRealA * 10.0;
     short  maxDischargeCurrentScaled  = (short) maxDischargeCurrentScaledD;
-    LOG.debug("maxPackDischargeCurrent: raw={} A, scaled={} (x10) -> 0x{}",
-              aggregatedPack.maxPackDischargeCurrent, maxDischargeCurrentScaled,
-              String.format("%04X", maxDischargeCurrentScaled));
+
+    LOG.debug(
+        "maxPackDischargeCurrent: raw={} A -> encodedScaled={} (0.1A units), encodedHex=0x{}",
+        aggregatedPack.maxPackDischargeCurrent,
+        maxDischargeCurrentScaled,
+        String.format("%04X", maxDischargeCurrentScaled & 0xFFFF)
+    );
     buffer.putShort(maxDischargeCurrentScaled);
 
-    // 5) MOSFET / force-charge flags (same bit usage as before, but now a raw byte)
-    LOG.debug("charge/discharge MOS flags BEFORE bit-pack: chargeMOSState={}, dischargeMOSState={}, forceCharge={}",
-              aggregatedPack.chargeMOSState,
-              aggregatedPack.dischargeMOSState,
-              aggregatedPack.forceCharge);
+    // ----- 5) MOSFET / force-charge flags -----
+    LOG.debug(
+        "charge/discharge MOS flags BEFORE bit-pack: chargeMOSState={}, dischargeMOSState={}, forceCharge={}",
+        aggregatedPack.chargeMOSState,
+        aggregatedPack.dischargeMOSState,
+        aggregatedPack.forceCharge
+    );
 
     byte flags = 0x00;
     flags = BitUtil.setBit(flags, 7, aggregatedPack.chargeMOSState);
     flags = BitUtil.setBit(flags, 6, aggregatedPack.dischargeMOSState);
     flags = BitUtil.setBit(flags, 5, aggregatedPack.forceCharge);
 
-    LOG.debug("chargeDischargeMOSStates: finalByte=0x{}, bits=[charge(bit7)={}, discharge(bit6)={}, force(bit5)={}]",
-              String.format("%02X", flags),
-              aggregatedPack.chargeMOSState,
-              aggregatedPack.dischargeMOSState,
-              aggregatedPack.forceCharge);
-
+    LOG.debug(
+        "chargeDischargeMOSStates: finalByte=0x{}, bits=[charge(bit7)={}, discharge(bit6)={}, force(bit5)={}]",
+        String.format("%02X", flags),
+        aggregatedPack.chargeMOSState,
+        aggregatedPack.dischargeMOSState,
+        aggregatedPack.forceCharge
+    );
     buffer.put(flags);
 
+    // ----- Finalize -----
     buffer.flip();
     final byte[] data = new byte[buffer.remaining()];
     buffer.get(data);
@@ -818,6 +934,7 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
 
     return data;
 }
+
 
 
 
