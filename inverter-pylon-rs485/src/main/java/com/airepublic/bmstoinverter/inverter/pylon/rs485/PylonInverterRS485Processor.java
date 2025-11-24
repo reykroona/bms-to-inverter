@@ -118,8 +118,8 @@ public class PylonInverterRS485Processor extends Inverter {
             LOG.debug("Inverter is not requesting data, no frames to send");
             // try to send data actively
 
-            //final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
-            //frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
+            final byte adr = 0x12; // this is wrong anyway as the CID1 should be 0x46 for responses
+            frames.add(prepareSendFrame(adr, (byte) 0x4F, (byte) 0x00, createProtocolVersion(aggregatedPack)));
             // frames.add(prepareSendFrame(adr, (byte) 0x51, (byte) 0x00,
             // createManufacturerCode(aggregatedPack)));
             // frames.add(prepareSendFrame(adr, (byte) 0x92, (byte) 0x00,
@@ -135,8 +135,8 @@ public class PylonInverterRS485Processor extends Inverter {
             // frames.add(prepareSendFrame(adr, (byte) 0x63, (byte) 0x00,
             // createChargeDischargeIfno(aggregatedPack)));
 
-            //LOG.debug("Actively sending {} frames to inverter", frames.size());
-            //frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
+            LOG.debug("Actively sending {} frames to inverter", frames.size());
+            frames.stream().forEach(f -> System.out.println(Port.printBuffer(f)));
         }
 
         return frames;
@@ -511,21 +511,15 @@ private static void set16(byte[] payload, int offset, int value) {
 
 @Override
 protected ByteBuffer readRequest(final Port port) throws IOException {
-    // Read a full frame from the inverter port.
-    final ByteBuffer requestFrame = port.receiveFrame();
-
-    if (requestFrame == null || requestFrame.remaining() == 0) {
-        // No valid frame received; caller will handle the null.
-        LOG.debug("No frame received from inverter");
+    try {
+        return port.receiveFrame();
+    } catch (IOException e) {
+        // Inverter didn't send a full frame in time; log and treat as "no request".
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Pylon P3.5 readRequest: no complete frame available yet: {}", e.getMessage());
+        }
         return null;
     }
-
-    // Log what we got from the inverter (similar to the emulator debug output).
-    LOG.debug("Inverter actively requesting frames from BMS");
-    LOG.info("RX ASCII: {}", toAsciiString(requestFrame));
-    LOG.debug("RX: {}", Port.printBuffer(requestFrame));
-
-    return requestFrame;
 }
 
 
