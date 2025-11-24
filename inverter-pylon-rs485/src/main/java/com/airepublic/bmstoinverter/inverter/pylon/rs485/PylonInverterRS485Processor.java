@@ -1018,6 +1018,32 @@ private static String bytesToHex(byte[] bytes) {
     }
     return sb.toString();
 }
+
+public static byte[] hexStringToByteArray(String s) {
+    if (s == null) {
+        return null;
+    }
+
+    // Remove spaces or 0x prefixes
+    s = s.replaceAll("[^0-9A-Fa-f]", "");
+
+    // If odd number of characters, prepend a zero
+    if (s.length() % 2 != 0) {
+        s = "0" + s;
+    }
+
+    int len = s.length();
+    byte[] data = new byte[len / 2];
+
+    for (int i = 0; i < len; i += 2) {
+        data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+                            + Character.digit(s.charAt(i+1), 16));
+    }
+
+    return data;
+}
+
+
     
     private int sanitizeSoc(final BatteryPack pack) {
         if (pack.packSOC > 0) {
