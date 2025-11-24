@@ -135,45 +135,6 @@ switch (cid2) {
         break;
 }
 
-
-ByteBuffer prepareSendFrame(final byte address,
-                            final byte cid1,
-                            final byte cid2,
-                            final byte[] data) {
-    final int dataLen = (data != null) ? data.length : 0;
-
-    // 18 = SOI + VER + ADR + CID1 + CID2 + LEN(2) + CHKSUM(2) + EOI
-    final ByteBuffer sendFrame = ByteBuffer
-            .allocate(18 + dataLen)
-            .order(ByteOrder.BIG_ENDIAN);
-
-    sendFrame.put((byte) 0x7E); // SOI
-    sendFrame.put((byte) 0x32); // '2'
-    sendFrame.put((byte) 0x30); // '0'
-
-    // ADR, CID1, CID2 as ASCII hex
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
-
-    // LENGTH in ASCII, LENID/2, so we multiply by 2 for ASCII nibbles
-    sendFrame.put(createLengthCheckSum(dataLen * 2));
-
-    // INFO payload (may be empty)
-    if (dataLen > 0) {
-        sendFrame.put(data);
-    }
-
-    // CHKSUM over everything from VER to last INFO byte
-    sendFrame.put(createChecksum(sendFrame));
-
-    // EOI
-    sendFrame.put((byte) 0x0D);
-
-    return sendFrame;
-}
-
-
     
     private String toAsciiString(final ByteBuffer buffer) {
         final ByteBuffer copy = buffer.asReadOnlyBuffer();
@@ -644,24 +605,43 @@ protected ByteBuffer readRequest(final Port port) throws IOException {
     }
 
 
-    ByteBuffer prepareSendFrame(final byte address, final byte cid1, final byte cid2, final byte[] data) {
-        final ByteBuffer sendFrame = ByteBuffer.allocate(18 + data.length).order(ByteOrder.BIG_ENDIAN);
-        sendFrame.put((byte) 0x7E); // Start flag
-        sendFrame.put((byte) 0x32); // version
-        sendFrame.put((byte) 0x30); // version
-        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address)); // address
-        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1)); // command CID1
-        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2)); // command CID2
-        // Frame Length Byte
-        sendFrame.put(createLengthCheckSum(data.length));
-        // data
-        sendFrame.put(data);
-        // checksum
-        sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
-        sendFrame.put((byte) 0x0D); // End flag
+ByteBuffer prepareSendFrame(final byte address,
+                            final byte cid1,
+                            final byte cid2,
+                            final byte[] data) {
+    final int dataLen = (data != null) ? data.length : 0;
 
-        return sendFrame;
+    // 18 = SOI + VER + ADR + CID1 + CID2 + LEN(2) + CHKSUM(2) + EOI
+    final ByteBuffer sendFrame = ByteBuffer
+            .allocate(18 + dataLen)
+            .order(ByteOrder.BIG_ENDIAN);
+
+    sendFrame.put((byte) 0x7E); // SOI
+    sendFrame.put((byte) 0x32); // '2'
+    sendFrame.put((byte) 0x30); // '0'
+
+    // ADR, CID1, CID2 as ASCII hex
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
+
+    // LENGTH in ASCII, LENID/2, so we multiply by 2 for ASCII nibbles
+    sendFrame.put(createLengthCheckSum(dataLen * 2));
+
+    // INFO payload (may be empty)
+    if (dataLen > 0) {
+        sendFrame.put(data);
     }
+
+    // CHKSUM over everything from VER to last INFO byte
+    sendFrame.put(createChecksum(sendFrame));
+
+    // EOI
+    sendFrame.put((byte) 0x0D);
+
+    return sendFrame;
+}
+
 
 
     private byte[] createChecksum(final ByteBuffer sendFrame, final int bodyLength) {
