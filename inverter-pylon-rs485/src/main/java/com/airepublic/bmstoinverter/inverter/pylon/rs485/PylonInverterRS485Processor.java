@@ -272,11 +272,11 @@ public class PylonInverterRS485Processor extends Inverter {
 
 
 // 0x61 – Battery information for Pylon 3.5
-private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
+private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     // Safety: if aggregation failed, just return an empty buffer and let the caller handle it.
     if (aggregatedPack == null) {
         LOG.warn("Pylon P3.5: aggregatedPack is null in createBatteryInformation()");
-        return ByteBuffer.wrap(new byte[0]);
+        return new byte[0];
     }
 
     // According to Pylon 3.5, most numeric fields are ASCII-encoded hex of tenths or whole units.
@@ -286,7 +286,7 @@ private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
 
     // 1) Pack voltage (0.01 V units) – 4 hex chars
     //    Example: 52.30 V → 5230 (0x1476)
-    int packVoltage_mV100 = (int) Math.round(aggregatedPack.getVoltage() * 100.0);
+    int packVoltage_mV100 = aggregatedPack.packVoltage * 10; // packVoltage is 0.1V → 0.01V units
     if (packVoltage_mV100 < 0) {
         packVoltage_mV100 = 0;
     }
@@ -294,18 +294,18 @@ private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
 
     // 2) Pack current (0.1 A units, sign-aware) – 4 hex chars
     //    Charge = positive, Discharge = negative
-    double currentA = aggregatedPack.getCurrent();
+    double currentA = aggregatedPack.packCurrent / 10.0; // packCurrent is 0.1A
     int packCurrent_A10 = (int) Math.round(currentA * 10.0);
     payload.append(String.format("%04X", packCurrent_A10 & 0xFFFF));
 
     // 3) SOC (%) – 2 hex chars
-    int soc = aggregatedPack.getSoc();
+    int soc = aggregatedPack.packSOC / 10; // packSOC is 0.1%
     if (soc < 0) soc = 0;
     if (soc > 100) soc = 100;
     payload.append(String.format("%02X", soc));
 
     // 4) SOH (%) – 2 hex chars
-    int soh = aggregatedPack.getSoh();
+    int soh = aggregatedPack.packSOH / 10; // packSOH is 0.1%
     if (soh <= 0 || soh > 100) {
         // If we don’t know SOH, assume 100
         soh = 100;
@@ -314,21 +314,21 @@ private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
 
     // 5) Nominal capacity (Ah, 0.1Ah units) – 4 hex chars
     //    ratedCapacitymAh / 100 → 0.1Ah units
-    int ratedCapacity01Ah = aggregatedPack.getCapacity() / 100; // mAh → 0.1Ah
+    int ratedCapacity01Ah = aggregatedPack.ratedCapacitymAh / 100; // mAh → 0.1Ah
     if (ratedCapacity01Ah < 0) {
         ratedCapacity01Ah = 0;
     }
     payload.append(String.format("%04X", ratedCapacity01Ah & 0xFFFF));
 
     // 6) Remaining capacity (Ah, 0.1Ah units) – 4 hex chars
-    int remainingCapacity01Ah = aggregatedPack.getRemainingCapacitymAh() / 100;
+    int remainingCapacity01Ah = aggregatedPack.remainingCapacitymAh / 100;
     if (remainingCapacity01Ah < 0) {
         remainingCapacity01Ah = 0;
     }
     payload.append(String.format("%04X", remainingCapacity01Ah & 0xFFFF));
 
     // 7) Pack temperature – 4 hex chars (Kelvin*10 = (°C + 273.1)*10)
-    double tempC = aggregatedPack.getTemperatureCelsius();
+    double tempC = aggregatedPack.tempAverage / 10.0; // tempAverage is 0.1°C
     // If Daly gives something crazy or 0xFFFF, guard it
     if (Double.isNaN(tempC) || tempC < -40.0 || tempC > 80.0) {
         // If we have no valid temperature, assume 25°C
@@ -338,12 +338,12 @@ private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
     payload.append(String.format("%04X", tempK10 & 0xFFFF));
 
     // 8) Total cycles – 4 hex chars
-    int cycles = aggregatedPack.getCycles();
+    int cycles = aggregatedPack.bmsCycles;
     if (cycles < 0) cycles = 0;
     payload.append(String.format("%04X", cycles & 0xFFFF));
 
     // 9) Cell count – 2 hex chars
-    int cellCount = aggregatedPack.getCellCount();
+    int cellCount = aggregatedPack.numberOfCells;
     if (cellCount < 0 || cellCount > 0xFF) {
         cellCount = 0;
     }
@@ -367,9 +367,8 @@ private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
         payload.setLength(desiredPayloadLen);
     }
 
-    // Wrap in ByteBuffer as ASCII bytes; the upper layer will prepend "~20024600"
-    // and append CRC + '\r' using prepareSendFrame().
-    return ByteBuffer.wrap(payload.toString().getBytes(StandardCharsets.US_ASCII));
+    // Return ASCII bytes; the upper layer will prepend "~20024600" and append CRC + '\r'.
+    return payload.toString().getBytes(StandardCharsets.US_ASCII);
 }
 
 
@@ -438,10 +437,10 @@ private ByteBuffer createBatteryInformation(final BatteryPack aggregatedPack) {
     }
 
 // 0x63 – Charge / Discharge information for Pylon 3.5
-private ByteBuffer createChargeDischargeIfno(final BatteryPack aggregatedPack) {
+private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     if (aggregatedPack == null) {
         LOG.warn("Pylon P3.5: aggregatedPack is null in createChargeDischargeIfno()");
-        return ByteBuffer.wrap(new byte[0]);
+        return new byte[0];
     }
 
     final StringBuilder payload = new StringBuilder();
@@ -476,15 +475,15 @@ private ByteBuffer createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     };
 
     // 1) Max charge current (0.1A units) – 4 hex chars
-    int maxChargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.getMaxPackChargeCurrent(), "maxCharge");
+    int maxChargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.maxPackChargeCurrent, "maxCharge");
     payload.append(String.format("%04X", maxChargeCurrent01A & 0xFFFF));
 
     // 2) Max discharge current (0.1A units) – 4 hex chars
-    int maxDischargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.getMaxPackDischargeCurrent(), "maxDischarge");
+    int maxDischargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.maxPackDischargeCurrent, "maxDischarge");
     payload.append(String.format("%04X", maxDischargeCurrent01A & 0xFFFF));
 
     // 3) Max charge voltage (0.01V units) – 4 hex chars
-    double chargeLimitV = aggregatedPack.getMaxPackChargeVoltage();
+    double chargeLimitV = aggregatedPack.maxPackVoltageLimit / 10.0; // maxPackVoltageLimit is 0.1V
     if (Double.isNaN(chargeLimitV) || chargeLimitV <= 0.0) {
         // Fall back to something reasonable per 14s Li-ion, e.g. 57.4V
         chargeLimitV = 57.4;
@@ -493,7 +492,7 @@ private ByteBuffer createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     payload.append(String.format("%04X", maxChargeVoltage01V & 0xFFFF));
 
     // 4) Min discharge voltage (0.01V units) – 4 hex chars
-    double dischargeLimitV = aggregatedPack.getMinPackDischargeVoltage();
+    double dischargeLimitV = aggregatedPack.minPackVoltageLimit / 10.0; // minPackVoltageLimit is 0.1V
     if (Double.isNaN(dischargeLimitV) || dischargeLimitV <= 0.0) {
         // Reasonable "empty" voltage for 14s, e.g. ~44V
         dischargeLimitV = 44.0;
@@ -511,7 +510,7 @@ private ByteBuffer createChargeDischargeIfno(final BatteryPack aggregatedPack) {
         payload.setLength(desiredPayloadLen);
     }
 
-    return ByteBuffer.wrap(payload.toString().getBytes(StandardCharsets.US_ASCII));
+    return payload.toString().getBytes(StandardCharsets.US_ASCII);
 }
 
 
@@ -596,6 +595,22 @@ protected ByteBuffer readRequest(final Port port) throws IOException {
         }
 
         return (int) raw;
+    }
+
+
+    private String padRight(final String value, final int length, final char padChar) {
+        if (length <= 0) {
+            return value;
+        }
+
+        final StringBuilder builder = new StringBuilder(value);
+
+        final int padCount = Math.max(0, length - value.length());
+        for (int i = 0; i < padCount; i++) {
+            builder.append(padChar);
+        }
+
+        return builder.toString();
     }
 
 
