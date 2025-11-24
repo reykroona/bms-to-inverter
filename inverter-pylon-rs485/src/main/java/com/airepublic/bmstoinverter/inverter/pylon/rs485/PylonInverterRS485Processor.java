@@ -112,15 +112,19 @@ if (System.currentTimeMillis() - startupTime < 5000) {
                 case 0x60: // 0x60 System Info
                     responseData = createSystemInfo(aggregatedPack);
                 break;
-                case 0x61: // 0x61 Battery Information
-                    responseData = createBatteryInformation(aggregatedPack);
-                break;
+
+
+    case 0x61:
+        frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x61,
+            createBatteryInformation(aggregatedPack)));
+        break;
                 case 0x62:
                     responseData = createAlarms(aggregatedPack);
                 break; // 0x62 Alarms
-                case 0x63:
-                    responseData = createChargeDischargeIfno(aggregatedPack);
-                break; // 0x63
+    case 0x63:
+        frames.add(prepareSendFrame(adr, (byte) 0x46, (byte) 0x63,
+            createChargeDischargeIfno(aggregatedPack)));
+        break;
 
                 default:
                     // not supported
@@ -297,19 +301,38 @@ if (System.currentTimeMillis() - startupTime < 5000) {
     }
 
 // 0x61 – Battery information for Pylon 3.5
-// 0x61
+// 0x61 – Get System analog data
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     final ByteBuffer buffer = ByteBuffer.allocate(4096);
 
-    buffer.put(ByteAsciiConverter.convertCharToAsciiBytes((char) (aggregatedPack.packVoltage * 100)));
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.packCurrent * 10)));
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOC / 10)));
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.bmsCycles)); // average cycles
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 10000));                     // maximum cycles
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOH / 10))); // average SOH
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOH / 10))); // lowest SOH
+    // 1  Battery system average voltage (V, 0.01 or 0.001 depending on packVoltage units)
+    buffer.put(ByteAsciiConverter.convertCharToAsciiBytes(
+            (char) (aggregatedPack.packVoltage * 100)));
 
-    // find the pack with the highest/lowest cell voltage
+    // 2  Battery system current (A, 0.1)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.packCurrent * 10)));
+
+    // 3  Battery system SOC (%)
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) (aggregatedPack.packSOC / 10)));
+
+    // 4  Average charge/discharge cycles
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) aggregatedPack.bmsCycles));
+
+    // 5  Max design cycles
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 10000));
+
+    // 6  Average SOH (%)
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) (aggregatedPack.packSOH / 10)));
+
+    // 7  Lowest SOH (%)
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) (aggregatedPack.packSOH / 10)));
+
+    // ---- Cell voltage info ----
     int maxPack = 0;
     int minPack = 0;
 
@@ -319,23 +342,34 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         if (pack.maxCellmV == aggregatedPack.maxCellmV) {
             maxPack = i;
         }
-
         if (pack.minCellmV == aggregatedPack.minCellmV) {
             minPack = i;
         }
     }
 
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.maxCellmV));
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));                  // pack with highest V
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.maxCellVNum)); // cell with highest V
+    // 8  Highest cell voltage (mV)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) aggregatedPack.maxCellmV));
+    // 9  Pack with highest cell voltage
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));
+    // 10 Cell number with highest voltage
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) aggregatedPack.maxCellVNum));
 
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.minCellmV));
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));                  // pack with lowest V
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.minCellVNum)); // cell with lowest V
+    // 11 Lowest cell voltage (mV)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) aggregatedPack.minCellmV));
+    // 12 Pack with lowest cell voltage
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));
+    // 13 Cell number with lowest voltage
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) aggregatedPack.minCellVNum));
 
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // ---- Cell temperatures ----
+    // 12 in the table – average cell temperature (°C + 273.1*10)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
 
-    // find the pack with the highest/lowest cell temperature
     maxPack = 0;
     minPack = 0;
 
@@ -345,53 +379,66 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         if (pack.tempMax == aggregatedPack.tempMax) {
             maxPack = i;
         }
-
         if (pack.tempMin == aggregatedPack.tempMin) {
             minPack = i;
         }
     }
 
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempMax + 2731)));
+    // 13  Max cell temperature (K*10)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempMax + 2731)));
+    // 14  Pack of max cell temperature
     buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.tempMaxCellNum));
+    // 15  Probe number of max temp
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) aggregatedPack.tempMaxCellNum));
 
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempMin + 2731)));
+    // 16  Min cell temperature (K*10)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempMin + 2731)));
+    // 17  Pack of min cell temperature
     buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));
-    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.tempMinCellNum));
+    // 18  Probe number of min temp
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(
+            (byte) aggregatedPack.tempMinCellNum));
 
-    // MOSFET average temperature
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
-    // MOSFET max temperature
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
-    // MOSFET max temperature pack
+    // ---- MOSFET temperatures (using pack average as a proxy) ----
+    // 19 MOSFET average temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
+    // 20 MOSFET max temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
+    // 21 MOSFET max temp pack
     buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
-    // MOSFET min temperature
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
-    // MOSFET min temperature pack
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
-
-    // BMS average temperature
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
-    // BMS max temperature
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
-    // BMS max temperature pack
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
-    // BMS min temperature
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
-    // BMS min temperature pack
+    // 22 MOSFET min temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
+    // 23 MOSFET min temp pack
     buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
 
-    // ✅ IMPORTANT: capture length before flip
-    final int length = buffer.position();
+    // ---- BMS temperatures (again using average as proxy) ----
+    // 24 BMS average temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
+    // 25 BMS max temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
+    // 26 BMS max temp pack
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+    // 27 BMS min temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.tempAverage + 2731)));
+    // 28 BMS min temp pack
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+
+    final byte[] data = new byte[buffer.position()];
     buffer.flip();
-
-    final byte[] data = new byte[length];
-    buffer.get(data);
-
-    LOG.debug("createBatteryInformation(): payload length = {}", length);
+    buffer.get(data, 0, data.length);
 
     return data;
 }
+
 
     // 0x62
     private byte[] createAlarms(final BatteryPack pack) {
@@ -456,15 +503,27 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         return alarms;
     }
 
-// 0x63 – Charge / Discharge information for Pylon 3.5
+// 0x63 – Get System charge/discharge control info
 private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
     final ByteBuffer buffer = ByteBuffer.allocate(4096);
 
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackVoltageLimit * 100)));
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.minPackVoltageLimit * 100)));
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackChargeCurrent * 10)));
-    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackDischargeCurrent * 10)));
+    // 1  Max system charge voltage (V * 0.01)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.maxPackVoltageLimit * 100)));
 
+    // 2  Min system discharge voltage (V * 0.01)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.minPackVoltageLimit * 100)));
+
+    // 3  Max charge current (A * 0.1)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.maxPackChargeCurrent * 10)));
+
+    // 4  Max discharge current (A * 0.1)
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes(
+            (short) (aggregatedPack.maxPackDischargeCurrent * 10)));
+
+    // 5  MOSFET / force-charge flags (same as emulator)
     byte chargeDischargeMOSStates = 0x00;
     chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 7, aggregatedPack.chargeMOSState);
     chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 6, aggregatedPack.dischargeMOSState);
@@ -472,17 +531,13 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
 
     buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(chargeDischargeMOSStates));
 
-    // ✅ capture length before flip
-    final int length = buffer.position();
+    final byte[] data = new byte[buffer.position()];
     buffer.flip();
-
-    final byte[] data = new byte[length];
-    buffer.get(data);
-
-    LOG.debug("createChargeDischargeIfno(): payload length = {}", length);
+    buffer.get(data, 0, data.length);
 
     return data;
 }
+
 
     
 @Override
