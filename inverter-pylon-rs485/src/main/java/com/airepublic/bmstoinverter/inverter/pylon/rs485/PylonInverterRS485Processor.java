@@ -623,22 +623,23 @@ protected ByteBuffer readRequest(final Port port) throws IOException {
         sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1)); // command CID1
         sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2)); // command CID2
         // Frame Length Byte
-        sendFrame.put(createLengthCheckSum(data.length * 2));
+        sendFrame.put(createLengthCheckSum(data.length));
         // data
         sendFrame.put(data);
         // checksum
-        sendFrame.put(createChecksum(sendFrame));
+        sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
         sendFrame.put((byte) 0x0D); // End flag
 
         return sendFrame;
     }
 
 
-    private byte[] createChecksum(final ByteBuffer sendFrame) {
+    private byte[] createChecksum(final ByteBuffer sendFrame, final int bodyLength) {
         int sum = 0;
 
-        // We assume the first byte is the SOI (0x7E) and is NOT included in checksum
-        for (int i = 1; i < sendFrame.capacity(); i++) {
+        // We assume the first byte is the SOI (0x7E) and is NOT included in checksum.
+        // Only sum the ASCII bytes from VER through the last INFO byte.
+        for (int i = 1; i < bodyLength; i++) {
             sum += sendFrame.get(i);
         }
 
@@ -664,17 +665,17 @@ protected ByteBuffer readRequest(final Port port) throws IOException {
     }
 
 
-    private byte[] createLengthCheckSum(final int length) {
-        // Ensure LENID fits 12 bits
-        final int lenId = length & 0x0FFF;
+    private byte[] createLengthCheckSum(final int infoAsciiLength) {
+        // LENID is the number of ASCII bytes in the INFO field (already ASCII-encoded).
+        final int lenId = infoAsciiLength & 0x0FFF;
 
-        // Split LENID into high/low bytes
-        final int high = lenId >> 8 & 0xFF;
-        final int low = lenId & 0xFF;
+        // Calculate LCHKSUM nibble using complement-of-sum-of-nibbles + 1
+        final int d11_8 = lenId >> 8 & 0x0F;
+        final int d7_4 = lenId >> 4 & 0x0F;
+        final int d3_0 = lenId & 0x0F;
 
-        // Compute 4-bit LCHKSUM so that (LCHKSUM + high + low) == 0 mod 16
-        final int sum = high + low & 0x0F;
-        final int lchk = ~sum + 1 & 0x0F;
+        final int sum = d11_8 + d7_4 + d3_0;
+        final int lchk = ~(sum & 0x0F) + 1 & 0x0F;
 
         // Combine into 16-bit LENGTH value
         final int lengthField = (lchk << 12 | lenId) & 0xFFFF;
