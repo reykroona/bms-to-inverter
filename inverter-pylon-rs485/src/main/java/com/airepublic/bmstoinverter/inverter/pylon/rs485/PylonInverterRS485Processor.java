@@ -297,84 +297,101 @@ if (System.currentTimeMillis() - startupTime < 5000) {
     }
 
 // 0x61 – Battery information for Pylon 3.5
+// 0x61
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
-    if (aggregatedPack == null) {
-        LOG.warn("Pylon P3.5: aggregatedPack is null in createBatteryInformation()");
-        return new byte[0];
+    final ByteBuffer buffer = ByteBuffer.allocate(4096);
+
+    buffer.put(ByteAsciiConverter.convertCharToAsciiBytes((char) (aggregatedPack.packVoltage * 100)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.packCurrent * 10)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOC / 10)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.bmsCycles)); // average cycles
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 10000));                     // maximum cycles
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOH / 10))); // average SOH
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) (aggregatedPack.packSOH / 10))); // lowest SOH
+
+    // find the pack with the highest/lowest cell voltage
+    int maxPack = 0;
+    int minPack = 0;
+
+    for (int i = 0; i < getEnergyStorage().getBatteryPacks().size(); i++) {
+        final BatteryPack pack = getEnergyStorage().getBatteryPack(i);
+
+        if (pack.maxCellmV == aggregatedPack.maxCellmV) {
+            maxPack = i;
+        }
+
+        if (pack.minCellmV == aggregatedPack.minCellmV) {
+            minPack = i;
+        }
     }
 
-    // 49-byte *binary* template matching your working Python emulator:
-    // 8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
-    byte[] payload = hexToBytes(
-        "8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101"
-    );
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.maxCellmV));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));                  // pack with highest V
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.maxCellVNum)); // cell with highest V
 
-    // -----------------------------
-    // Patch real values into template
-    // Offsets are in *binary* bytes
-    // -----------------------------
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) aggregatedPack.minCellmV));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));                  // pack with lowest V
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.minCellVNum)); // cell with lowest V
 
-    // 1) Pack voltage → 0.01 V units (uint16), bytes 0–1
-    // Daly packVoltage is 0.1V units, so *10 → 0.01V.
-    int pv01V = aggregatedPack.packVoltage * 10;
-    if (pv01V < 0) pv01V = 0;
-    set16(payload, 0, pv01V);
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
 
-    // 2) Pack current → 0.1A units, signed, bytes 2–3
-    // Daly packCurrent is already in 0.1A units with sign.
-    int pc01A = aggregatedPack.packCurrent;
-    set16(payload, 2, pc01A & 0xFFFF);
+    // find the pack with the highest/lowest cell temperature
+    maxPack = 0;
+    minPack = 0;
 
-    // 3) SOC (%) – byte 4 (use sanitizeSoc helper to avoid 0 / nonsense)
-    int socTenth = sanitizeSoc(aggregatedPack);   // 0.1% units
-    int soc = socTenth / 10;
-    if (soc < 0) soc = 0;
-    if (soc > 100) soc = 100;
-    payload[4] = (byte) (soc & 0xFF);
+    for (int i = 0; i < getEnergyStorage().getBatteryPacks().size(); i++) {
+        final BatteryPack pack = getEnergyStorage().getBatteryPack(i);
 
-    // 4) SOH (%) – byte 5
-    int sohTenth = aggregatedPack.packSOH;        // assume 0.1% units, may be 0
-    int soh = sohTenth > 0 ? sohTenth / 10 : 100; // default to 100% if unknown
-    if (soh < 0) soh = 0;
-    if (soh > 100) soh = 100;
-    payload[5] = (byte) (soh & 0xFF);
+        if (pack.tempMax == aggregatedPack.tempMax) {
+            maxPack = i;
+        }
 
-    // 5) Rated capacity (mAh → 0.1Ah units), bytes 6–7
-    int rated = aggregatedPack.ratedCapacitymAh / 100;  // mAh / 100 → 0.1Ah units
-    if (rated < 0) rated = 0;
-    set16(payload, 6, rated);
-
-    // 6) Remaining capacity (mAh → 0.1Ah units), bytes 8–9
-    int remain = aggregatedPack.remainingCapacitymAh / 100;
-    if (remain < 0) remain = 0;
-    set16(payload, 8, remain);
-
-    // 7) Temperature: 0.1°C → protocol Kelvin*10 units, bytes 10–11
-    int tempTenthsC = sanitizeTemperature(aggregatedPack.tempAverage); // 0.1°C
-    double tempC = tempTenthsC / 10.0;
-    // Pylon: T_raw = T_C*10 + 2731
-    int tempK10 = (int) Math.round(tempC * 10.0 + 2731);
-    set16(payload, 10, tempK10);
-
-    // 8) Cycle count, bytes 12–13
-    int cycles = aggregatedPack.bmsCycles;
-    if (cycles < 0) cycles = 0;
-    set16(payload, 12, cycles);
-
-    // 9) Cell count, byte 14
-    int cellCount = aggregatedPack.numberOfCells;
-    if (cellCount < 0 || cellCount > 255) {
-        cellCount = 0;
+        if (pack.tempMin == aggregatedPack.tempMin) {
+            minPack = i;
+        }
     }
-    payload[14] = (byte) (cellCount & 0xFF);
 
-    // The rest of the payload (bytes 15–48) remains as in the template.
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempMax + 2731)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) maxPack));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.tempMaxCellNum));
 
-    // IMPORTANT: return INFO as ASCII hex, *not* binary.
-    return bytesToAsciiHex(payload);
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempMin + 2731)));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) minPack));
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) aggregatedPack.tempMinCellNum));
+
+    // MOSFET average temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // MOSFET max temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // MOSFET max temperature pack
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+    // MOSFET min temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // MOSFET min temperature pack
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+
+    // BMS average temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // BMS max temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // BMS max temperature pack
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+    // BMS min temperature
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.tempAverage + 2731)));
+    // BMS min temperature pack
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) 0));
+
+    // ✅ IMPORTANT: capture length before flip
+    final int length = buffer.position();
+    buffer.flip();
+
+    final byte[] data = new byte[length];
+    buffer.get(data);
+
+    LOG.debug("createBatteryInformation(): payload length = {}", length);
+
+    return data;
 }
-
-
 
     // 0x62
     private byte[] createAlarms(final BatteryPack pack) {
@@ -441,111 +458,33 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
 
 // 0x63 – Charge / Discharge information for Pylon 3.5
 private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
-    if (aggregatedPack == null) {
-        LOG.warn("Pylon P3.5: aggregatedPack is null in createChargeDischargeIfno()");
-        return new byte[0];
-    }
+    final ByteBuffer buffer = ByteBuffer.allocate(4096);
 
-    final StringBuilder payload = new StringBuilder();
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackVoltageLimit * 100)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.minPackVoltageLimit * 100)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackChargeCurrent * 10)));
+    buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (aggregatedPack.maxPackDischargeCurrent * 10)));
 
-    // Helper to normalize a Daly current limit (0.1A units) with 100Balance quirks.
-    java.util.function.BiFunction<Integer, String, Integer> normalizeLimit01A = (raw01A, label) -> {
-        int limit01A = raw01A != null ? raw01A : 0;
+    byte chargeDischargeMOSStates = 0x00;
+    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 7, aggregatedPack.chargeMOSState);
+    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 6, aggregatedPack.dischargeMOSState);
+    chargeDischargeMOSStates = BitUtil.setBit(chargeDischargeMOSStates, 5, aggregatedPack.forceCharge);
 
-        // Daly 100Balance sometimes uses 0 or 0xFFFF to mean "no limit / unknown".
-        if (limit01A <= 0 || limit01A == 0xFFFF) {
-            // Fall back to default (e.g. 20A) so the inverter doesn't see 0.
-            double defaultAmps = DEFAULT_CURRENT_LIMIT_A; // e.g. 20.0
-            limit01A = (int) Math.round(defaultAmps * 10.0);
+    buffer.put(ByteAsciiConverter.convertByteToAsciiBytes(chargeDischargeMOSStates));
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Pylon P3.5 frame: {} limit invalid (raw=0x{}), using default {}A ({} A×10)",
-                          label,
-                          Integer.toHexString(raw01A != null ? raw01A : 0),
-                          defaultAmps,
-                          limit01A);
-            }
-        }
+    // ✅ capture length before flip
+    final int length = buffer.position();
+    buffer.flip();
 
-        // Some BMS firmwares can report absurdly large values; clamp to something sane,
-        // e.g. 200A max:
-        double amps = limit01A / 10.0;
-        if (amps > 200.0) {
-            limit01A = 2000;
-        }
+    final byte[] data = new byte[length];
+    buffer.get(data);
 
-        return limit01A;
-    };
+    LOG.debug("createChargeDischargeIfno(): payload length = {}", length);
 
-    // 1) Max charge current (0.1A units) – 4 hex chars
-    int maxChargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.maxPackChargeCurrent, "maxCharge");
-    payload.append(String.format("%04X", maxChargeCurrent01A & 0xFFFF));
-
-    // 2) Max discharge current (0.1A units) – 4 hex chars
-    int maxDischargeCurrent01A = normalizeLimit01A.apply(aggregatedPack.maxPackDischargeCurrent, "maxDischarge");
-    payload.append(String.format("%04X", maxDischargeCurrent01A & 0xFFFF));
-
-    // 3) Max charge voltage (0.01V units) – 4 hex chars
-    double chargeLimitV = aggregatedPack.maxPackVoltageLimit / 10.0; // maxPackVoltageLimit is 0.1V
-    if (Double.isNaN(chargeLimitV) || chargeLimitV <= 0.0) {
-        // Fall back to something reasonable per 14s Li-ion, e.g. 57.4V
-        chargeLimitV = 57.4;
-    }
-    int maxChargeVoltage01V = (int) Math.round(chargeLimitV * 100.0);
-    payload.append(String.format("%04X", maxChargeVoltage01V & 0xFFFF));
-
-    // 4) Min discharge voltage (0.01V units) – 4 hex chars
-    double dischargeLimitV = aggregatedPack.minPackVoltageLimit / 10.0; // minPackVoltageLimit is 0.1V
-    if (Double.isNaN(dischargeLimitV) || dischargeLimitV <= 0.0) {
-        // Reasonable "empty" voltage for 14s, e.g. ~44V
-        dischargeLimitV = 44.0;
-    }
-    int minDischargeVoltage01V = (int) Math.round(dischargeLimitV * 100.0);
-    payload.append(String.format("%04X", minDischargeVoltage01V & 0xFFFF));
-
-    return payload.toString().getBytes(StandardCharsets.US_ASCII);
-}
-
-/**
- * Convert an even-length hex string to a byte array (binary).
- */
-private static byte[] hexToBytes(String hex) {
-    int len = hex.length();
-    if ((len & 1) != 0) {
-        throw new IllegalArgumentException("hex string must have even length");
-    }
-    byte[] data = new byte[len / 2];
-    for (int i = 0; i < len; i += 2) {
-        int hi = Character.digit(hex.charAt(i), 16);
-        int lo = Character.digit(hex.charAt(i + 1), 16);
-        if (hi < 0 || lo < 0) {
-            throw new IllegalArgumentException("invalid hex character in: " + hex);
-        }
-        data[i / 2] = (byte) ((hi << 4) + lo);
-    }
     return data;
 }
 
-/**
- * Write a 16-bit value into payload[offset..offset+1] big-endian.
- */
-private static void set16(byte[] payload, int offset, int value) {
-    payload[offset]     = (byte) ((value >> 8) & 0xFF);
-    payload[offset + 1] = (byte) (value & 0xFF);
-}
-
-/**
- * Convert binary bytes to ASCII hex bytes.
- */
-private static byte[] bytesToAsciiHex(byte[] payload) {
-    StringBuilder sb = new StringBuilder(payload.length * 2);
-    for (byte b : payload) {
-        sb.append(String.format("%02X", b & 0xFF));
-    }
-    return sb.toString().getBytes(StandardCharsets.US_ASCII);
-}
-
-
+    
 @Override
 protected ByteBuffer readRequest(final Port port) throws IOException {
     try {
