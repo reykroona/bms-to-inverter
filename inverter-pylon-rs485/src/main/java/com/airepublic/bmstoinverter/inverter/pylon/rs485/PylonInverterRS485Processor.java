@@ -93,48 +93,39 @@ if (System.currentTimeMillis() - startupTime < 5000) {
 
             byte[] responseData = null;
 
-switch (cid2) {
-    case 0x4F:
-        responseData = createProtocolVersion(aggregatedPack);
-        break;
+            switch (cid2) {
+                case 0x4F: // 0x4F Protocol Version
+                    responseData = createProtocolVersion(aggregatedPack);
+                break;
+                case 0x51: // 0x51 Manufacturer Code
+                    responseData = createManufacturerCode(aggregatedPack);
+                break;
+                case (byte) 0x92: // 0x92 Charge/Discharge Management Info
+                    responseData = createChargeDischargeManagementInfo(aggregatedPack);
+                break;
+                case 0x42: // 0x42 Cell Information
+                    responseData = createCellInformation(aggregatedPack);
+                break;
+                case 0x47: // 0x47 Voltage/Current Limits
+                    responseData = createVoltageCurrentLimits(aggregatedPack);
+                break;
+                case 0x60: // 0x60 System Info
+                    responseData = createSystemInfo(aggregatedPack);
+                break;
+                case 0x61: // 0x61 Battery Information
+                    responseData = createBatteryInformation(aggregatedPack);
+                break;
+                case 0x62:
+                    responseData = createAlarms(aggregatedPack);
+                break; // 0x62 Alarms
+                case 0x63:
+                    responseData = createChargeDischargeIfno(aggregatedPack);
+                break; // 0x63
 
-    case 0x51:
-        responseData = createManufacturerCode(aggregatedPack);
-        break;
-
-    case (byte) 0x92:
-        responseData = createChargeDischargeManagementInfo(aggregatedPack);
-        break;
-
-    case 0x42:
-        responseData = createCellInformation(aggregatedPack);
-        break;
-
-    case 0x47:
-        responseData = createVoltageCurrentLimits(aggregatedPack);
-        break;
-
-    case 0x60:
-        responseData = createSystemInfo(aggregatedPack);
-        break;
-
-    case 0x61:
-        responseData = createBatteryInformation(aggregatedPack);
-        LOG.debug("Payload 61 length = {}", 
-                   responseData != null ? responseData.length : -1);
-        break;
-
-    case 0x63:
-        responseData = createChargeDischargeIfno(aggregatedPack);
-        LOG.debug("Payload 63 length = {}", 
-                   responseData != null ? responseData.length : -1);
-        break;
-
-    default:
-        LOG.warn("Unsupported CID2 0x{}, not sending any frames",
-                 String.format("%02X", cid2));
-        break;
-}
+                default:
+                    // not supported
+                    return frames;
+            }
 
             final ByteBuffer responseFrame = prepareSendFrame(adr, cid1, (byte) 0x00, responseData);
             frames.add(responseFrame);
@@ -596,42 +587,25 @@ protected ByteBuffer readRequest(final Port port) throws IOException {
     }
 
 
-ByteBuffer prepareSendFrame(final byte address,
-                            final byte cid1,
-                            final byte cid2,
-                            final byte[] data) {
-    final int dataLen = (data != null) ? data.length : 0;
-
-    // 18 = SOI + VER + ADR + CID1 + CID2 + LEN(2) + CHKSUM(2) + EOI
-    final ByteBuffer sendFrame = ByteBuffer
-            .allocate(18 + dataLen)
-            .order(ByteOrder.BIG_ENDIAN);
-
-    sendFrame.put((byte) 0x7E); // SOI
-    sendFrame.put((byte) 0x32); // '2'
-    sendFrame.put((byte) 0x30); // '0'
-
-    // ADR, CID1, CID2 as ASCII hex
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
-
-    // LENGTH in ASCII, LENID/2, so we multiply by 2 for ASCII nibbles
-    sendFrame.put(createLengthCheckSum(dataLen * 2));
-
-    // INFO payload (may be empty)
-    if (dataLen > 0) {
+    ByteBuffer prepareSendFrame(final byte address, final byte cid1, final byte cid2, final byte[] data) {
+        final ByteBuffer sendFrame = ByteBuffer.allocate(18 + data.length).order(ByteOrder.BIG_ENDIAN);
+        sendFrame.put((byte) 0x7E); // Start flag
+        sendFrame.put((byte) 0x32); // version
+        sendFrame.put((byte) 0x30); // version
+        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address)); // address
+        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1)); // command CID1
+        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2)); // command CID2
+        // Frame Length Byte
+        sendFrame.put(createLengthCheckSum(data.length));
+        // data
         sendFrame.put(data);
+        // checksum
+        sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
+        sendFrame.put((byte) 0x0D); // End flag
+
+        return sendFrame;
     }
 
-    // CHKSUM over everything from VER to last INFO byte
-    sendFrame.put(createChecksum(sendFrame));
-
-    // EOI
-    sendFrame.put((byte) 0x0D);
-
-    return sendFrame;
-}
 
     private byte[] createChecksum(final ByteBuffer sendFrame, final int bodyLength) {
         int sum = 0;
