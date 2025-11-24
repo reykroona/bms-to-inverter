@@ -142,7 +142,35 @@ public class PylonInverterRS485Processor extends Inverter {
         return frames;
     }
 
+/**
+ * Convert an even-length hex string to a byte array.
+ */
+private static byte[] hexToBytes(String hex) {
+    int len = hex.length();
+    if ((len & 1) != 0) {
+        throw new IllegalArgumentException("hex string must have even length");
+    }
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i < len; i += 2) {
+        int hi = Character.digit(hex.charAt(i), 16);
+        int lo = Character.digit(hex.charAt(i + 1), 16);
+        if (hi < 0 || lo < 0) {
+            throw new IllegalArgumentException("invalid hex character in: " + hex);
+        }
+        data[i / 2] = (byte) ((hi << 4) + lo);
+    }
+    return data;
+}
 
+/**
+ * Write a 16-bit value into payload[offset..offset+1] big-endian.
+ */
+private static void set16(byte[] payload, int offset, int value) {
+    payload[offset]     = (byte) ((value >> 8) & 0xFF);
+    payload[offset + 1] = (byte) (value & 0xFF);
+}
+
+    
     private String toAsciiString(final ByteBuffer buffer) {
         final ByteBuffer copy = buffer.asReadOnlyBuffer();
         copy.rewind();
@@ -270,7 +298,6 @@ public class PylonInverterRS485Processor extends Inverter {
         return data;
     }
 
-
 // 0x61 – Battery information for Pylon 3.5
 private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
     if (aggregatedPack == null) {
@@ -278,85 +305,76 @@ private byte[] createBatteryInformation(final BatteryPack aggregatedPack) {
         return new byte[0];
     }
 
-    // -----------------------------
-    // 1. Emulator 51-byte template
-    // -----------------------------
-    // From working Python emulator:
+    // 51-byte payload template copied from known-good emulator:
     //
     //   8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101
     //
-    // This is EXACTLY 51 bytes of payload.
-    // We patch only the fields the inverter actually cares about.
-    //
+    // We will patch only the fields we actually care about (voltage, current, SOC, etc.).
     byte[] payload = hexToBytes(
         "8062CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101"
     );
 
-    // Helper to write big-endian Uint16 into the payload
-    final BiConsumer<Integer, Integer> set16 = (offset, value) -> {
-        payload[offset]     = (byte)((value >> 8) & 0xFF);
-        payload[offset + 1] = (byte)(value & 0xFF);
-    };
-
     // -----------------------------
-    // 2. Patch real values into template
+    // Patch real values into template
     // -----------------------------
 
-    // Pack voltage → 0.01 V units → uint16
-    int pv = aggregatedPack.packVoltage * 10;  // already 0.1V, so *10 = 0.01V
+    // 1) Pack voltage → 0.01 V units (uint16), bytes 0–1
+    int pv = aggregatedPack.packVoltage * 10;   // packVoltage is 0.1V → *10 → 0.01V
     if (pv < 0) pv = 0;
-    set16.accept(0, pv);  // bytes 0–1
+    set16(payload, 0, pv);
 
-    // Pack current (0.1A → 0.1A) but Pylon wants 0.1A scaled *10? (same as emulator)
-    // We keep your existing behavior: packCurrent is already 0.1A
-    int pc = aggregatedPack.packCurrent;       // sign preserved
-    set16.accept(2, pc & 0xFFFF);              // bytes 2–3
+    // 2) Pack current → 0.1A units (signed), bytes 2–3
+    //    packCurrent is already in 0.1A units with sign (charge +, discharge –)
+    int pc = aggregatedPack.packCurrent;
+    set16(payload, 2, pc & 0xFFFF);
 
-    // SOC (%)
-    int soc = aggregatedPack.packSOC / 10;     // convert 0.1% → %
+    // 3) SOC (%) – byte 4
+    int soc = aggregatedPack.packSOC / 10;      // 0.1% → %
     if (soc < 0) soc = 0;
     if (soc > 100) soc = 100;
-    payload[4] = (byte)(soc & 0xFF);
+    payload[4] = (byte) (soc & 0xFF);
 
-    // SOH (%)
-    int soh = aggregatedPack.packSOH / 10;
-    if (soh <= 0 || soh > 100) soh = 100;
-    payload[5] = (byte)(soh & 0xFF);
+    // 4) SOH (%) – byte 5
+    int soh = aggregatedPack.packSOH / 10;      // 0.1% → %
+    if (soh <= 0 || soh > 100) {
+        soh = 100;                              // default if unknown
+    }
+    payload[5] = (byte) (soh & 0xFF);
 
-    // Rated capacity (mAh → 0.1Ah → uint16)
+    // 5) Rated capacity (mAh → 0.1Ah units), bytes 6–7
     int rated = aggregatedPack.ratedCapacitymAh / 100;
     if (rated < 0) rated = 0;
-    set16.accept(6, rated);
+    set16(payload, 6, rated);
 
-    // Remaining capacity (mAh → 0.1Ah)
+    // 6) Remaining capacity (mAh → 0.1Ah units), bytes 8–9
     int remain = aggregatedPack.remainingCapacitymAh / 100;
     if (remain < 0) remain = 0;
-    set16.accept(8, remain);
+    set16(payload, 8, remain);
 
-    // Temperature (0.1°C → Kelvin*10)
+    // 7) Temperature: 0.1°C → Kelvin*10, bytes 10–11
     double tempC = aggregatedPack.tempAverage / 10.0;
-    if (Double.isNaN(tempC) || tempC < -40.0 || tempC > 80.0) tempC = 25.0;
-    int tempK10 = (int)Math.round((tempC + 273.1) * 10.0);
-    set16.accept(10, tempK10);
+    if (Double.isNaN(tempC) || tempC < -40.0 || tempC > 80.0) {
+        tempC = 25.0; // safe default
+    }
+    int tempK10 = (int) Math.round((tempC + 273.1) * 10.0);
+    set16(payload, 10, tempK10);
 
-    // Cycle count
+    // 8) Cycle count, bytes 12–13
     int cycles = aggregatedPack.bmsCycles;
     if (cycles < 0) cycles = 0;
-    set16.accept(12, cycles);
+    set16(payload, 12, cycles);
 
-    // Cell count
+    // 9) Cell count, byte 14
     int cellCount = aggregatedPack.numberOfCells;
-    if (cellCount < 0 || cellCount > 255) cellCount = 0;
-    payload[14] = (byte)(cellCount & 0xFF);
+    if (cellCount < 0 || cellCount > 255) {
+        cellCount = 0;
+    }
+    payload[14] = (byte) (cellCount & 0xFF);
 
-    // -----------------------------
-    // Done — return the 51-byte payload
-    // Upper layer prepends "~20024661" and appends CRC + "\r"
-    // -----------------------------
-    return payload;
+    // The rest of the payload (bytes 15–50) is left exactly as in the emulator template.
+
+    return payload; // upper layer adds "~20024661" + CRC + "\r"
 }
-
-
 
 
     // 0x62
