@@ -340,9 +340,9 @@ return frames;
         buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (50 * 10 + 2731))); // max charge temp
         buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (-40 * 10 + 2731))); // min charge temp
         buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) resolveCurrentLimitA10(pack.maxPackChargeCurrent, "maxCharge", pack)));
-        buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (pack.maxPackVoltageLimit * 100)));
-        buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (pack.minPackVoltageLimit * 100))); // warning
-        buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (pack.minPackVoltageLimit * 100))); // protect
+        buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (pack.maxPackVoltageLimit * .3)));
+        buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (pack.minPackVoltageLimit * .3))); // warning
+        buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (pack.minPackVoltageLimit * .3))); // protect
         buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (50 * 10 + 2731))); // max discharge temp
         buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) (-40 * 10 + 2731))); // min discharge temp
         buffer.put(ByteAsciiConverter.convertShortToAsciiBytes((short) resolveCurrentLimitA10(pack.maxPackDischargeCurrent, "maxDischarge", pack)));
@@ -657,8 +657,8 @@ final double chargePerCell_V  = 4.20;   // typical Li-ion charge limit
 final double dischargePerCell_V = 3.00; // typical discharge lower limit
 
 // Daly raw values (likely module-level, 0.1V units)
-double maxVoltRealV_daly = aggregatedPack.maxPackVoltageLimit / 10.0;
-double minVoltRealV_daly = aggregatedPack.minPackVoltageLimit / 10.0;
+double maxVoltRealV_daly = aggregatedPack.maxPackVoltageLimit * 0.3;
+double minVoltRealV_daly = aggregatedPack.minPackVoltageLimit * 0.3;
 
 int chargeUpper_mV = (int) Math.round(chargePerCell_V * 1000.0 * cellsInSeries);   // e.g. 4.20 * 1000 * 14 = 58800
 int dischargeLower_mV = (int) Math.round(dischargePerCell_V * 1000.0 * cellsInSeries); // 3.00 * 1000 * 14 = 44800
