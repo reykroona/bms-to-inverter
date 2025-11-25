@@ -83,23 +83,42 @@ return frames;
 }
 
         // check if the inverter is actively requesting data
-        if (requestFrame != null) {
-            LOG.debug("Inverter actively requesting frames from BMS");
-            LOG.info("RX ASCII: {}", toAsciiString(requestFrame));
-            requestFrame.position(3);
-            final byte adr = ByteAsciiConverter.convertAsciiBytesToByte(requestFrame.get(), requestFrame.get());
-            final byte cid1 = ByteAsciiConverter.convertAsciiBytesToByte(requestFrame.get(), requestFrame.get());
-            final byte cid2 = ByteAsciiConverter.convertAsciiBytesToByte(requestFrame.get(), requestFrame.get());
-            final byte[] lengthBytes = new byte[4];
-            requestFrame.get(lengthBytes);
-            final int length = ByteAsciiConverter.convertAsciiBytesToShort(lengthBytes) & 0x0FFF;
-            final byte[] data = new byte[length];
-            requestFrame.get(data);
+if (requestFrame != null) {
+    // Make a copy for validation
+    final ByteBuffer copy = requestFrame.asReadOnlyBuffer();
+    copy.rewind();
+    final byte[] raw = new byte[copy.remaining()];
+    copy.get(raw);
 
-            if (cid1 != 0x46) {
-                // not supported
-                return frames;
-            }
+    // Log the whole thing
+    LOG.info("RX ASCII: {}", new String(raw, StandardCharsets.US_ASCII));
+
+    // Basic framing check: must start with '~' and end with '\r'
+    if (raw.length < 5 || raw[0] != 0x7E || raw[raw.length - 1] != 0x0D) {
+        LOG.warn("Dropping malformed frame: bad SOI/EOI or too short (len={})", raw.length);
+        return frames; // no reply this cycle
+    }
+
+    // Validate that everything between SOI and EOI is ASCII-hex only
+    boolean hexOk = true;
+    for (int i = 1; i < raw.length - 1; i++) {
+        int b = raw[i] & 0xFF;
+        boolean isHex =
+            (b >= '0' && b <= '9') ||
+            (b >= 'A' && b <= 'F') ||
+            (b == '2' && i == 1 && raw[2] == '0'); // allow the "20" at VER, but this is redundant anyway
+
+        if (!isHex) {
+            LOG.warn("Dropping malformed frame: non-hex byte 0x{} ('{}') at index {}",
+                     String.format("%02X", b), (char)b, i);
+            hexOk = false;
+            break;
+        }
+    }
+
+    if (!hexOk) {
+        return frames; // do not parse / respond
+    }
 
 /*            byte[] responseData = null;
 
