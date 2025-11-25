@@ -71,8 +71,8 @@ public class InverterProducer extends PluginProducer {
             inverter = CDI.current().select(descriptor.getInverterClass()).get();
             final String portLocator = System.getProperty("inverter.portLocator");
             final int baudRate = Integer.valueOf(System.getProperty("inverter.baudRate"));
-            final int sendInterval = Integer.valueOf(System.getProperty("inverter.sendInterval"));
-            final InverterConfig config = new InverterConfig(portLocator, baudRate, sendInterval, descriptor);
+            final long sendIntervalMillis = resolveSendIntervalMillis();
+            final InverterConfig config = new InverterConfig(portLocator, baudRate, sendIntervalMillis, descriptor);
             LOG.info("Created inverter binding: " + descriptor.getName());
 
             // load configured plugins for the inverter
@@ -89,7 +89,7 @@ public class InverterProducer extends PluginProducer {
         System.setProperty("inverter.type", "SMA_SI_CAN");
         System.setProperty("inverter.portLocator", "can1");
         System.setProperty("inverter.baudRate", "500000");
-        System.setProperty("inverter.sendInterval", "1");
+        System.setProperty("inverter.sendIntervalMillis", "1000");
 
         System.setProperty("plugin.inverter.1.class", "com.airepublic.bmstoinverter.core.plugin.inverter.SimulatedBatteryPackPlugin");
         System.setProperty("plugin.inverter.1.property.1.name", "SOC");
@@ -122,6 +122,21 @@ public class InverterProducer extends PluginProducer {
 
         final InverterProducer p = new InverterProducer();
         p.createInverter();
+    }
+
+    private long resolveSendIntervalMillis() {
+        final String sendIntervalMillis = System.getProperty("inverter.sendIntervalMillis");
+        if (sendIntervalMillis != null) {
+            return Math.round(Double.parseDouble(sendIntervalMillis));
+        }
+
+        final String legacySeconds = System.getProperty("inverter.sendInterval");
+        if (legacySeconds != null) {
+            LOG.warn("Configuration property 'inverter.sendInterval' is deprecated. Please migrate to 'inverter.sendIntervalMillis' (milliseconds).");
+            return Math.round(Double.parseDouble(legacySeconds) * 1000d);
+        }
+
+        throw new IllegalStateException("No inverter send interval configured (expected inverter.sendIntervalMillis)");
     }
 
 }

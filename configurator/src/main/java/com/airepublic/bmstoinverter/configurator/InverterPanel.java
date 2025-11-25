@@ -33,6 +33,7 @@ public class InverterPanel extends JPanel {
     private final JTextField inverterBaudRateField;
     private final JTextField inverterSendIntervalField;
     private final NumberInputVerifier numberInputVerifier = new NumberInputVerifier();
+    private final DecimalInputVerifier decimalInputVerifier = new DecimalInputVerifier();
 
     public InverterPanel(final Configurator configurator) {
         setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -93,7 +94,7 @@ public class InverterPanel extends JPanel {
         add(inverterBaudRateField, gbc_inverterBaudRateField);
         inverterBaudRateField.setColumns(10);
 
-        final JLabel inverterSendIntervalLabel = new JLabel("Send interval");
+        final JLabel inverterSendIntervalLabel = new JLabel("Send interval (ms)");
         final GridBagConstraints gbc_inverterSendIntervalLabel = new GridBagConstraints();
         gbc_inverterSendIntervalLabel.insets = new Insets(0, 0, 5, 5);
         gbc_inverterSendIntervalLabel.anchor = GridBagConstraints.EAST;
@@ -101,10 +102,10 @@ public class InverterPanel extends JPanel {
         gbc_inverterSendIntervalLabel.gridy = 3;
         add(inverterSendIntervalLabel, gbc_inverterSendIntervalLabel);
 
-        inverterSendIntervalField = new JTextField("1");
-        inverterSendIntervalField.setToolTipText("Time in seconds to send data to the inverter");
+        inverterSendIntervalField = new JTextField("1000");
+        inverterSendIntervalField.setToolTipText("Time in milliseconds to send data to the inverter");
         inverterSendIntervalField.setColumns(10);
-        inverterSendIntervalField.setInputVerifier(numberInputVerifier);
+        inverterSendIntervalField.setInputVerifier(decimalInputVerifier);
         final GridBagConstraints gbc_inverterPushInvervalField = new GridBagConstraints();
         gbc_inverterPushInvervalField.insets = new Insets(0, 0, 5, 0);
         gbc_inverterPushInvervalField.fill = GridBagConstraints.BOTH;
@@ -145,8 +146,8 @@ public class InverterPanel extends JPanel {
     }
 
 
-    public int getSendInterval() {
-        return Integer.valueOf(inverterSendIntervalField.getText());
+    public long getSendIntervalMillis() {
+        return Math.round(Double.parseDouble(inverterSendIntervalField.getText()));
     }
 
 
@@ -174,7 +175,7 @@ public class InverterPanel extends JPanel {
         if (inverterSendIntervalField.getText().trim().isEmpty()) {
             errors.append("Missing inverter send interval!\n");
             fail = true;
-        } else if (!numberInputVerifier.verify(inverterSendIntervalField)) {
+        } else if (!decimalInputVerifier.verify(inverterSendIntervalField)) {
             errors.append("Non-numeric inverter send interval!\n");
             fail = true;
         }
@@ -193,8 +194,8 @@ public class InverterPanel extends JPanel {
         config.append("inverter.portLocator=" + getPortLocator() + "\n");
         config.append("# The port baud rate to use to communicate to the  inverter  \n");
         config.append("inverter.baudRate=" + getBaudRate() + "\n");
-        config.append("# Interval to send data to the inverter (in seconds)\n");
-        config.append("inverter.sendInterval=" + getSendInterval() + "\n");
+        config.append("# Interval to send data to the inverter (in milliseconds)\n");
+        config.append("inverter.sendIntervalMillis=" + getSendIntervalMillis() + "\n");
         config.append("\n");
 
     }
@@ -204,7 +205,17 @@ public class InverterPanel extends JPanel {
         final String inverterType = config.getProperty("inverter.type");
         final String portLocator = config.getProperty("inverter.portLocator");
         final int baudRate = Integer.parseInt(config.getProperty("inverter.baudRate"));
-        final int sendInterval = Integer.parseInt(config.getProperty("inverter.sendInterval"));
+        long sendIntervalMillis = 0L;
+
+        final String sendIntervalMillisStr = config.getProperty("inverter.sendIntervalMillis");
+        if (sendIntervalMillisStr != null) {
+            sendIntervalMillis = Math.round(Double.parseDouble(sendIntervalMillisStr));
+        } else {
+            final String legacySeconds = config.getProperty("inverter.sendInterval");
+            if (legacySeconds != null) {
+                sendIntervalMillis = Math.round(Double.parseDouble(legacySeconds) * 1000d);
+            }
+        }
 
         for (int i = 0; i < inverterItems.size(); i++) {
             if (inverterItems.get(i).getDisplayName().equals(inverterType)) {
@@ -215,6 +226,6 @@ public class InverterPanel extends JPanel {
 
         inverterPortLocatorField.setText(portLocator);
         inverterBaudRateField.setText("" + baudRate);
-        inverterSendIntervalField.setText("" + sendInterval);
+        inverterSendIntervalField.setText(sendIntervalMillis > 0 ? "" + sendIntervalMillis : "");
     }
 }
