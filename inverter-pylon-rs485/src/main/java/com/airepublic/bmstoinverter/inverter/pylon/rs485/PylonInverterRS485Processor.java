@@ -43,8 +43,8 @@ public class PylonInverterRS485Processor extends Inverter {
     private long startupTime = System.currentTimeMillis();
 
     // ====== EMULATION TOGGLES ======
-    private static final boolean USE_EMULATOR_61 = false;   // true = use emulator 0x61 payload
-    private static final boolean USE_EMULATOR_63 = false;   // true = use emulator 0x63 payload
+    private static final boolean USE_EMULATOR_61 = true;   // true = use emulator 0x61 payload
+    private static final boolean USE_EMULATOR_63 = true;   // true = use emulator 0x63 payload
     
     private static final byte[] EMU_PAYLOAD_61 = hexStringToByteArray("CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101");
 
@@ -67,17 +67,19 @@ public class PylonInverterRS485Processor extends Inverter {
 if (System.currentTimeMillis() - startupTime < 5000) {
     LOG.debug("Warm-up: sending fake startup frame to trigger inverter polling");
 
-    final byte adr = (byte)0x02;
+final byte adr = (byte) 0x02;
 
-    ByteBuffer warm = prepareSendFrame(
-        adr,
-        (byte)0x63,   // CID2
-        (byte)0x00,   // RTN
-        createChargeDischargeIfno(aggregatedPack) // ASCII HEX
-    );
+// Warm-up frame: mimic the Python emulator's 0x63 reply
+ByteBuffer warm = prepareSendFrame(
+    adr,
+    (byte) 0x46,            // CID1 = battery group, like Python
+    (byte) 0x63,            // CID2 = 0x63 (used only for routing in our code, not encoded)
+    createChargeDischargeIfno(aggregatedPack) // BINARY INFO (9 bytes)
+);
 
-    frames.add(warm);
-    return frames;
+frames.add(warm);
+return frames;
+
 }
 
         // check if the inverter is actively requesting data
@@ -1107,11 +1109,21 @@ public static byte[] hexStringToByteArray(String s) {
         return builder.toString();
     }
 
-// Wrapper: default is ASCII-encoded INFO
+// Wrapper: ignore binaryMode now; data is always BINARY INFO
 ByteBuffer prepareSendFrame(final byte address,
                             final byte cid1,
                             final byte cid2,
                             final byte[] data) {
+    return prepareSendFrame(address, cid1, cid2, data, false);
+}
+
+
+ByteBuffer prepareSendFrame(final byte address,
+                            final byte cid1,
+                            final byte cid2,   // not encoded; used only for logging/routing
+                            final byte[] data,
+                            final boolean binaryMode /*ignored*/) {
+
     if (data == null) {
         LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}): data is NULL",
                   String.format("%02X", address),
@@ -1120,50 +1132,63 @@ ByteBuffer prepareSendFrame(final byte address,
         return null;
     }
 
-    // Call the real one
-    return prepareSendFrame(address, cid1, cid2, data, false);
-}
+    // INFO is BINARY; we will encode it as ASCII hex in the frame.
+    final int infoLen       = data.length;      // number of binary bytes
+    final int asciiInfoLen  = infoLen * 2;      // number of ASCII bytes in INFO
+    final byte ver          = 0x20;             // protocol 2.0, as in Python
 
-// Real implementation: can handle ASCII or BINARY INFO
-ByteBuffer prepareSendFrame(final byte address,
-                            final byte cid1,
-                            final byte cid2,
-                            final byte[] data,
-                            final boolean binaryMode) {
+    // LENGTH field is computed over ASCII INFO length (bytes)
+    final byte[] lengthAscii = createLengthCheckSum(asciiInfoLen); // returns 4 ASCII bytes
 
-    if (data == null) {
-        LOG.error("prepareSendFrame(adr=0x{}, cid1=0x{}, cid2=0x{}): data is NULL",
-                String.format("%02X", address),
-                String.format("%02X", cid1),
-                String.format("%02X", cid2));
-        return null;
-    }
+    // Frame structure (all ASCII except SOI/EOI):
+    //  SOI         : 1
+    //  VER         : 2 ("20")
+    //  ADR         : 2
+    //  CID1        : 2
+    //  RTN=00      : 2
+    //  LENGTH      : 4 (LEN_H, LEN_L as ASCII)
+    //  INFO        : asciiInfoLen
+    //  CHKSUM      : 4 ASCII
+    //  EOI         : 1
+    final int frameCapacity = 1 + 2 + 2 + 2 + 2 + 4 + asciiInfoLen + 4 + 1;
 
-    final int dataLen = data.length;
     final ByteBuffer sendFrame = ByteBuffer
-            .allocate(18 + dataLen)
+            .allocate(frameCapacity)
             .order(ByteOrder.BIG_ENDIAN);
 
-    sendFrame.put((byte) 0x7E); // SOI
-    sendFrame.put((byte) 0x32);
-    sendFrame.put((byte) 0x30);
+    // SOI
+    sendFrame.put((byte) 0x7E);     // '~'
 
+    // VER = 0x20 -> "20"
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(ver));
+
+    // ADR
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(address));
+
+    // CID1 (for Pylon LV this is always 0x46)
     sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid1));
-    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(cid2));
 
-    sendFrame.put(createLengthCheckSum(dataLen * 2));
+    // RTN = 0x00 (OK) – this is the 4th field in the header, matching Python
+    sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes((byte) 0x00));
 
-    if (dataLen > 0) {
-        sendFrame.put(data);
+    // LENGTH (already ASCII from createLengthCheckSum)
+    sendFrame.put(lengthAscii);
+
+    // INFO: each binary byte as 2 ASCII hex chars
+    for (byte b : data) {
+        sendFrame.put(ByteAsciiConverter.convertByteToAsciiBytes(b));
     }
 
-    //sendFrame.put(createChecksum(sendFrame, sendFrame.position()));
+    // CHKSUM over all bytes from VER (index 1) through last INFO byte
     sendFrame.put(createChecksum(sendFrame));
+
+    // EOI
     sendFrame.put((byte) 0x0D);
 
+    sendFrame.flip();
     return sendFrame;
 }
+
 
 
 private byte[] createChecksum(final ByteBuffer frame) {
