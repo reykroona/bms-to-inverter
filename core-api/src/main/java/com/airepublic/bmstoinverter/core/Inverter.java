@@ -87,12 +87,12 @@ public abstract class Inverter {
 
 
     /**
-     * Gets the interval the data is sent to the inverter.
+     * Gets the interval the data is sent to the inverter in milliseconds.
      *
-     * @return the interval the data is sent to the inverter
+     * @return the interval the data is sent to the inverter in milliseconds
      */
-    public int getSendInterval() {
-        return config.getSendInterval();
+    public long getSendIntervalMillis() {
+        return config.getSendIntervalMillis();
     }
 
 

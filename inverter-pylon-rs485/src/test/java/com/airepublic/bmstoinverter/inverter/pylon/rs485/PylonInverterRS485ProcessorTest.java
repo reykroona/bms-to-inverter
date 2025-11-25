@@ -24,7 +24,7 @@ public class PylonInverterRS485ProcessorTest {
         }
     };
 
-    private final static InverterConfig inverterConfig = new InverterConfig("port0", 9600, 200, descriptor);
+    private final static InverterConfig inverterConfig = new InverterConfig("port0", 9600, 200_000L, descriptor);
     private final static JSerialCommPort port = new JSerialCommPort(inverterConfig.getPortLocator(), inverterConfig.getBaudRate(), 8, 1, SerialPort.NO_PARITY, new byte[] { (byte) 0x7E, (byte) 0x32 }, FrameDefinition.create("SOAAOCCCCOLLLDVVVVO")) {
         @Override
         public boolean isOpen() {

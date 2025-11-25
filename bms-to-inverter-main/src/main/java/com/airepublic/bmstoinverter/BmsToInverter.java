@@ -334,7 +334,7 @@ public class BmsToInverter implements AutoCloseable {
                         try {
                             LOG.info("Sending to inverter " + inverter.getName() + " on " + inverter.getPortLocator() + "...");
                             inverter.process(() -> sentData());
-                            Thread.sleep(inverter.getSendInterval() * 1000);
+                            Thread.sleep(inverter.getSendIntervalMillis());
                         } catch (final Throwable e) {
                         }
                     } while (running);

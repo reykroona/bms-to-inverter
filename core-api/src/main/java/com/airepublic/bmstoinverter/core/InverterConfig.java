@@ -16,13 +16,13 @@ package com.airepublic.bmstoinverter.core;
 public class InverterConfig {
     private final String portLocator;
     private final int baudRate;
-    private final int sendInterval;
+    private final long sendIntervalMillis;
     private final InverterDescriptor descriptor;
 
-    public InverterConfig(final String portLocator, final int baudRate, final int sendInterval, final InverterDescriptor descriptor) {
+    public InverterConfig(final String portLocator, final int baudRate, final long sendIntervalMillis, final InverterDescriptor descriptor) {
         this.portLocator = portLocator;
         this.baudRate = baudRate;
-        this.sendInterval = sendInterval;
+        this.sendIntervalMillis = sendIntervalMillis;
         this.descriptor = descriptor;
     }
 
@@ -48,12 +48,12 @@ public class InverterConfig {
 
 
     /**
-     * Gets the sending interval in seconds.
+     * Gets the sending interval in milliseconds.
      *
-     * @return the sending interval in seconds
+     * @return the sending interval in milliseconds
      */
-    public int getSendInterval() {
-        return sendInterval;
+    public long getSendIntervalMillis() {
+        return sendIntervalMillis;
     }
 
 
