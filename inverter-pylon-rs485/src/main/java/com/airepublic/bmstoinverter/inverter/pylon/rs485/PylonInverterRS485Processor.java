@@ -43,8 +43,8 @@ public class PylonInverterRS485Processor extends Inverter {
     private long startupTime = System.currentTimeMillis();
 
     // ====== EMULATION TOGGLES ======
-    private static final boolean USE_EMULATOR_61 = true;   // true = use emulator 0x61 payload
-    private static final boolean USE_EMULATOR_63 = true;   // true = use emulator 0x63 payload
+    private static final boolean USE_EMULATOR_61 = false;   // true = use emulator 0x61 payload
+    private static final boolean USE_EMULATOR_63 = false;   // true = use emulator 0x63 payload
     
     private static final byte[] EMU_PAYLOAD_61 = hexStringToByteArray("CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101");
 
@@ -217,8 +217,9 @@ if (requestFrame != null) {
 
             if (responseData == null) {
                 // Inverter asked for something we don't implement – just don't answer.
-                LOG.warn("Unsupported CID2 not sending any frames",
-
+                 LOG.warn("No responseData for ADR=0x{}, CID2=0x{}, not sending any frame this cycle",
+                 String.format("%02X", adr),
+                 String.format("%02X", cid2));
                 return frames;
             }
             
