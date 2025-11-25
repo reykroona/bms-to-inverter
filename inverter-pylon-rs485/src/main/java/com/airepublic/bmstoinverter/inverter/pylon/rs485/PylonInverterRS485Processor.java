@@ -44,7 +44,7 @@ public class PylonInverterRS485Processor extends Inverter {
 
     // ====== EMULATION TOGGLES ======
     private static final boolean USE_EMULATOR_61 = false;   // true = use emulator 0x61 payload
-    private static final boolean USE_EMULATOR_63 = true;   // true = use emulator 0x63 payload
+    private static final boolean USE_EMULATOR_63 = false;   // true = use emulator 0x63 payload
     
     private static final byte[] EMU_PAYLOAD_61 = hexStringToByteArray("CB20000050006400C863620DB801010CBB01010BAA0BB701010B9D01010BAA0BB801010B9C01010BAA0BB601010B9E0101");
 
@@ -650,85 +650,92 @@ private byte[] createChargeDischargeIfno(final BatteryPack aggregatedPack) {
 
     LOG.debug("createChargeDischargeIfno(): START for aggregatedPack = {}", aggregatedPack);
 
-    // ----- 1) Max system charge voltage -----
-    // aggregatedPack.maxPackVoltageLimit appears to be in 0.1 V units (e.g. 573 => 57.3 V)
-    double maxVoltRealV = aggregatedPack.maxPackVoltageLimit / 10.0;
-    // Empirical trick you discovered: divide by 3 to get a HV-ish value the inverter likes
-    double maxVoltScaledD = aggregatedPack.maxPackVoltageLimit / 3.0;
-    short  maxVoltScaled  = (short) maxVoltScaledD;
 
-    LOG.debug(
-        "maxPackVoltageLimit: raw={} (0.1V units) -> approxReal={} V, encodedScaled={} (raw/3), encodedHex=0x{}",
-        aggregatedPack.maxPackVoltageLimit,
-        maxVoltRealV,
-        maxVoltScaled,
-        String.format("%04X", maxVoltScaled & 0xFFFF)
-    );
-    buffer.putShort(maxVoltScaled);
+// ----- 1) Max system charge voltage (pack-level, mV) -----
+final int cellsInSeries       = 14;     // your pack is 14s
+final double chargePerCell_V  = 4.20;   // typical Li-ion charge limit
+final double dischargePerCell_V = 3.00; // typical discharge lower limit
 
-    // ----- 2) Min system discharge voltage -----
-    double minVoltRealV = aggregatedPack.minPackVoltageLimit / 10.0;
-    double minVoltScaledD = aggregatedPack.minPackVoltageLimit / 3.0;
-    short  minVoltScaled  = (short) minVoltScaledD;
+// Daly raw values (likely module-level, 0.1V units)
+double maxVoltRealV_daly = aggregatedPack.maxPackVoltageLimit / 10.0;
+double minVoltRealV_daly = aggregatedPack.minPackVoltageLimit / 10.0;
 
-    LOG.debug(
-        "minPackVoltageLimit: raw={} (0.1V units) -> approxReal={} V, encodedScaled={} (raw/3), encodedHex=0x{}",
-        aggregatedPack.minPackVoltageLimit,
-        minVoltRealV,
-        minVoltScaled,
-        String.format("%04X", minVoltScaled & 0xFFFF)
-    );
-    buffer.putShort(minVoltScaled);
+int chargeUpper_mV = (int) Math.round(chargePerCell_V * 1000.0 * cellsInSeries);   // e.g. 4.20 * 1000 * 14 = 58800
+int dischargeLower_mV = (int) Math.round(dischargePerCell_V * 1000.0 * cellsInSeries); // 3.00 * 1000 * 14 = 44800
 
-    // ----- 3) Max charge current -----
-    // aggregatedPack.maxPackChargeCurrent in A (or 0.1A depending on upstream).
-    // Here we assume it is in amps and we encode in 0.1A units (×10).
-    double maxChargeCurrentRealA = aggregatedPack.maxPackChargeCurrent;
-    double maxChargeCurrentScaledD = maxChargeCurrentRealA * 10.0;
-    short  maxChargeCurrentScaled  = (short) maxChargeCurrentScaledD;
+LOG.debug(
+    "createChargeDischargeIfno(): Daly raw limits: " +
+    "maxPackVoltageLimit={} (0.1V -> {} V), minPackVoltageLimit={} (0.1V -> {} V)",
+    aggregatedPack.maxPackVoltageLimit,
+    maxVoltRealV_daly,
+    aggregatedPack.minPackVoltageLimit,
+    minVoltRealV_daly
+);
 
-    LOG.debug(
-        "maxPackChargeCurrent: raw={} A -> encodedScaled={} (0.1A units), encodedHex=0x{}",
-        aggregatedPack.maxPackChargeCurrent,
-        maxChargeCurrentScaled,
-        String.format("%04X", maxChargeCurrentScaled & 0xFFFF)
-    );
-    buffer.putShort(maxChargeCurrentScaled);
+LOG.debug(
+    "createChargeDischargeIfno(): Using fixed pack limits for 0x63: " +
+    "cellsInSeries={} => chargeUpper={} V ({} mV, 0x{}), dischargeLower={} V ({} mV, 0x{})",
+    cellsInSeries,
+    String.format("%.2f", chargePerCell_V * cellsInSeries),
+    chargeUpper_mV,
+    String.format("%04X", chargeUpper_mV & 0xFFFF),
+    String.format("%.2f", dischargePerCell_V * cellsInSeries),
+    dischargeLower_mV,
+    String.format("%04X", dischargeLower_mV & 0xFFFF)
+);
 
-    // ----- 4) Max discharge current -----
-    double maxDischargeCurrentRealA = aggregatedPack.maxPackDischargeCurrent;
-    double maxDischargeCurrentScaledD = maxDischargeCurrentRealA * 10.0;
-    short  maxDischargeCurrentScaled  = (short) maxDischargeCurrentScaledD;
+// Put as shorts (big-endian) in mV, like the emulator
+buffer.putShort((short) chargeUpper_mV);
+buffer.putShort((short) dischargeLower_mV);
 
-    LOG.debug(
-        "maxPackDischargeCurrent: raw={} A -> encodedScaled={} (0.1A units), encodedHex=0x{}",
-        aggregatedPack.maxPackDischargeCurrent,
-        maxDischargeCurrentScaled,
-        String.format("%04X", maxDischargeCurrentScaled & 0xFFFF)
-    );
-    buffer.putShort(maxDischargeCurrentScaled);
+// ----- 3) Max charge current -----
+double maxChargeCurrentRealA       = aggregatedPack.maxPackChargeCurrent;
+double maxChargeCurrentScaledD     = maxChargeCurrentRealA * 10.0; // 0.1A units
+short  maxChargeCurrentScaled      = (short) maxChargeCurrentScaledD;
 
-    // ----- 5) MOSFET / force-charge flags -----
-    LOG.debug(
-        "charge/discharge MOS flags BEFORE bit-pack: chargeMOSState={}, dischargeMOSState={}, forceCharge={}",
-        aggregatedPack.chargeMOSState,
-        aggregatedPack.dischargeMOSState,
-        aggregatedPack.forceCharge
-    );
+LOG.debug(
+    "maxPackChargeCurrent: raw={} A -> encodedScaled={} (0.1A units), encodedHex=0x{}",
+    aggregatedPack.maxPackChargeCurrent,
+    maxChargeCurrentScaled,
+    String.format("%04X", maxChargeCurrentScaled & 0xFFFF)
+);
+buffer.putShort(maxChargeCurrentScaled);
 
-    byte flags = 0x00;
-    flags = BitUtil.setBit(flags, 7, aggregatedPack.chargeMOSState);
-    flags = BitUtil.setBit(flags, 6, aggregatedPack.dischargeMOSState);
-    flags = BitUtil.setBit(flags, 5, aggregatedPack.forceCharge);
+// ----- 4) Max discharge current -----
+double maxDischargeCurrentRealA    = aggregatedPack.maxPackDischargeCurrent;
+double maxDischargeCurrentScaledD  = maxDischargeCurrentRealA * 10.0; // 0.1A units
+short  maxDischargeCurrentScaled   = (short) maxDischargeCurrentScaledD;
 
-    LOG.debug(
-        "chargeDischargeMOSStates: finalByte=0x{}, bits=[charge(bit7)={}, discharge(bit6)={}, force(bit5)={}]",
-        String.format("%02X", flags),
-        aggregatedPack.chargeMOSState,
-        aggregatedPack.dischargeMOSState,
-        aggregatedPack.forceCharge
-    );
-    buffer.put(flags);
+LOG.debug(
+    "maxPackDischargeCurrent: raw={} A -> encodedScaled={} (0.1A units), encodedHex=0x{}",
+    aggregatedPack.maxPackDischargeCurrent,
+    maxDischargeCurrentScaled,
+    String.format("%04X", maxDischargeCurrentScaled & 0xFFFF)
+);
+buffer.putShort(maxDischargeCurrentScaled);
+
+// ----- 5) MOSFET / force-charge flags -----
+LOG.debug(
+    "charge/discharge MOS flags BEFORE bit-pack: chargeMOSState={}, dischargeMOSState={}, forceCharge={}",
+    aggregatedPack.chargeMOSState,
+    aggregatedPack.dischargeMOSState,
+    aggregatedPack.forceCharge
+);
+
+byte flags = 0x00;
+flags = BitUtil.setBit(flags, 7, aggregatedPack.chargeMOSState);
+flags = BitUtil.setBit(flags, 6, aggregatedPack.dischargeMOSState);
+flags = BitUtil.setBit(flags, 5, aggregatedPack.forceCharge);
+
+LOG.debug(
+    "chargeDischargeMOSStates: finalByte=0x{}, bits=[charge(bit7)={}, discharge(bit6)={}, force(bit5)={}]",
+    String.format("%02X", flags),
+    aggregatedPack.chargeMOSState,
+    aggregatedPack.dischargeMOSState,
+    aggregatedPack.forceCharge
+);
+buffer.put(flags);
+
 
     // ----- Finalize -----
     buffer.flip();
