@@ -100,12 +100,7 @@ return frames;
                 // not supported
                 return frames;
             }
-            
-            if (adr != 0x02) {
-                LOG.debug("Ignoring ADR 0x{}, only emulating single-battery mode",
-                          String.format("%02X", adr));
-                return frames;
-            }
+        
 
 /*            byte[] responseData = null;
 
