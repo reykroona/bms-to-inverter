@@ -265,7 +265,7 @@ public class Configurator extends JFrame {
 
         // download the application source
         out.append("Downloading application...");
-        downloadFile(new URL("https://github.com/ai-republic/bms-to-inverter/archive/master.zip"), srcZip.toFile());
+        downloadFile(new URL("https://github.com/reykroona/bms-to-inverter/archive/refs/heads/main.zip"), srcZip.toFile());
         out.append("done\n");
         unzip(srcZip, tempDirectory);
 
