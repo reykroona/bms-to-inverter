@@ -215,11 +215,9 @@ if (requestFrame != null) {
                     break;
             }
 
+            // ⬇️ This is the important part
             if (responseData == null) {
                 // Inverter asked for something we don't implement – just don't answer.
-                 LOG.warn("No responseData for ADR=0x{}, CID2=0x{}, not sending any frame this cycle",
-                 String.format("%02X", adr),
-                 String.format("%02X", cid2));
                 return frames;
             }
             
